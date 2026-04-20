@@ -20,6 +20,10 @@ export interface SkillMeta {
   bundledSkills: BundledSkillView[] | null;
   /** For recommended plugins: marketplace registry id (e.g. "anthropic-agent-skills"). */
   marketplaceId: string | null;
+  /** For recommended plugins: arg for `claude plugin marketplace add <arg>` (e.g. "anthropics/skills"). */
+  marketplaceAddArg: string | null;
+  /** For recommended plugins: e.g. "Anthropic 官方". */
+  marketplaceOwnerLabel: string | null;
 }
 
 export interface SkillsReport {

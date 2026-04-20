@@ -23,12 +23,14 @@ interface InstallSteps {
 /**
  * Build the two-step slash commands to install a recommended plugin
  * inside a Claude Code session. Each command must be sent separately
- * (slash commands cannot be chained with `&&`).
+ * (slash commands cannot be chained with `&&`). The `marketplace add`
+ * step is idempotent — re-running on an already-registered marketplace
+ * just prints "already on disk" with no side effects.
  */
 function buildInstallSteps(skill: SkillMeta): InstallSteps | null {
-  if (!skill.marketplaceId) return null;
+  if (!skill.marketplaceId || !skill.marketplaceAddArg) return null;
   return {
-    marketplaceAdd: `/plugin marketplace add anthropics/skills`,
+    marketplaceAdd: `/plugin marketplace add ${skill.marketplaceAddArg}`,
     pluginInstall: `/plugin install ${skill.name}@${skill.marketplaceId}`,
   };
 }
@@ -149,6 +151,13 @@ function TabBtn({
 
 function SkillCard({ skill, onClick }: { skill: SkillMeta; onClick: () => void }) {
   const bundledCount = skill.bundledSkills?.length ?? 0;
+  const tagParts = [
+    SOURCE_LABEL[skill.source],
+    skill.pluginName,
+    skill.marketplaceOwnerLabel,
+    bundledCount > 0 ? `${bundledCount} 个 skill` : null,
+    skill.category,
+  ].filter(Boolean);
   return (
     <li>
       <button
@@ -158,9 +167,7 @@ function SkillCard({ skill, onClick }: { skill: SkillMeta; onClick: () => void }
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-medium">{skill.name}</p>
           <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-            {SOURCE_LABEL[skill.source]}
-            {skill.pluginName ? ` · ${skill.pluginName}` : ''}
-            {bundledCount > 0 ? ` · ${bundledCount} 个 skill` : ''}
+            {tagParts.join(' · ')}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>

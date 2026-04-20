@@ -15,11 +15,17 @@ pub struct SkillMeta {
     pub installed: bool,
     pub category: Option<String>,
     /// For recommended plugins: list of skills bundled inside.
-    /// `None` for individually installed skills.
+    /// `None` for individually installed skills or recommend plugins
+    /// without explicit bundled skill metadata in seed.
     pub bundled_skills: Option<Vec<BundledSkillView>>,
     /// For recommended plugins: marketplace registry id to install from
     /// (e.g. "anthropic-agent-skills"). Used by frontend to build install cmd.
     pub marketplace_id: Option<String>,
+    /// For recommended plugins: argument to `claude plugin marketplace add <arg>`
+    /// (typically the GitHub repo path, e.g. "anthropics/skills").
+    pub marketplace_add_arg: Option<String>,
+    /// Human-readable label of who maintains the marketplace (e.g. "Anthropic 官方").
+    pub marketplace_owner_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +53,8 @@ struct SeedBundledSkill {
 
 #[derive(Debug, Deserialize)]
 struct SeedPluginEntry {
+    #[serde(rename = "marketplaceId")]
+    marketplace_id: String,
     name: String,
     description: String,
     category: Option<String>,
@@ -55,9 +63,16 @@ struct SeedPluginEntry {
 }
 
 #[derive(Debug, Deserialize)]
+struct SeedMarketplace {
+    #[serde(rename = "marketplaceAddArg")]
+    marketplace_add_arg: String,
+    #[serde(rename = "ownerLabel")]
+    owner_label: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct SeedFile {
-    #[serde(rename = "marketplaceId")]
-    marketplace_id: String,
+    marketplaces: std::collections::HashMap<String, SeedMarketplace>,
     plugins: Vec<SeedPluginEntry>,
 }
 
@@ -145,6 +160,8 @@ fn scan_skills_dir(dir: &Path, source: SkillSource, plugin_name: Option<String>)
             category: None,
             bundled_skills: None,
             marketplace_id: None,
+            marketplace_add_arg: None,
+            marketplace_owner_label: None,
         });
     }
     out
@@ -241,24 +258,29 @@ pub fn list_recommended_skills(installed: &[SkillMeta]) -> Vec<SkillMeta> {
     seed.plugins
         .into_iter()
         .filter(|p| !installed_plugin_names.contains(p.name.as_str()))
-        .map(|p| SkillMeta {
-            id: format!("recommend::{}", p.name),
-            name: p.name,
-            description: p.description,
-            source: SkillSource::Recommend,
-            plugin_name: None,
-            path: String::new(),
-            installed: false,
-            category: p.category,
-            bundled_skills: p.bundled_skills.map(|bs| {
-                bs.into_iter()
-                    .map(|s| BundledSkillView {
-                        name: s.name,
-                        description_zh: s.description_zh.unwrap_or_default(),
-                    })
-                    .collect()
-            }),
-            marketplace_id: Some(seed.marketplace_id.clone()),
+        .map(|p| {
+            let mp = seed.marketplaces.get(&p.marketplace_id);
+            SkillMeta {
+                id: format!("recommend::{}::{}", p.marketplace_id, p.name),
+                name: p.name,
+                description: p.description,
+                source: SkillSource::Recommend,
+                plugin_name: None,
+                path: String::new(),
+                installed: false,
+                category: p.category,
+                bundled_skills: p.bundled_skills.map(|bs| {
+                    bs.into_iter()
+                        .map(|s| BundledSkillView {
+                            name: s.name,
+                            description_zh: s.description_zh.unwrap_or_default(),
+                        })
+                        .collect()
+                }),
+                marketplace_id: Some(p.marketplace_id.clone()),
+                marketplace_add_arg: mp.map(|m| m.marketplace_add_arg.clone()),
+                marketplace_owner_label: mp.and_then(|m| m.owner_label.clone()),
+            }
         })
         .collect()
 }
