@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { Download, ExternalLink, RefreshCw, Settings } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Modal } from '@/components/ui/Modal';
 import { useEnv } from '@/store/env';
 import { installGit, installClaudeCode } from '@/ipc/installer';
 import { InstallProgressDialog } from '@/components/InstallProgressDialog';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { t } from '@/i18n/zh-CN';
 
 const CLAUDE_DOWNLOAD_URL = 'https://claude.com/code';
@@ -18,6 +19,7 @@ export function ReadinessWizard() {
   const refresh = useEnv((s) => s.refresh);
 
   const [activeInstall, setActiveInstall] = useState<ActiveInstall>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (!report) return null;
 
@@ -68,23 +70,44 @@ export function ReadinessWizard() {
         ariaLabel={t.ready.wizardTitle}
       >
         <div className="w-[520px] max-w-full">
-          <h2 className="text-lg font-semibold">{t.ready.wizardTitle}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t.ready.problemsDetected}</p>
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">{t.ready.wizardTitle}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t.ready.problemsDetected}</p>
+            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+              title="打开设置（配代理 / 调试开关）"
+            >
+              <Settings className="h-3 w-3" />
+              设置
+            </button>
+          </div>
 
           {!networkOk && (
             <ProblemRow
               tone="warning"
               title="网络无法访问 Anthropic"
-              description="请确认你的网络可访问 api.anthropic.com（如有需要可在系统层面开启 VPN）"
+              description="若已开 VPN 仍不通：VPN 多半走「系统代理」模式，不覆盖命令行程序。点右侧「配置代理」填入 Clash/V2Ray 的 HTTPS 代理地址即可。"
               actions={
-                <button
-                  onClick={() => void refresh()}
-                  disabled={loading}
-                  className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  我已开 VPN，重试
-                </button>
+                <>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+                  >
+                    <Settings className="h-3 w-3" />
+                    配置代理
+                  </button>
+                  <button
+                    onClick={() => void refresh()}
+                    disabled={loading}
+                    className="flex items-center gap-1 rounded border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    我已开 VPN，重试
+                  </button>
+                </>
               }
             />
           )}
@@ -192,6 +215,8 @@ export function ReadinessWizard() {
         }
         onClose={() => setActiveInstall(null)}
       />
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }
