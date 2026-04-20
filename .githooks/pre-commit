@@ -1,0 +1,4 @@
+#!/bin/sh
+# ClaudeTool pre-commit hook
+# Runs lint-staged inside app/ to format & lint touched files
+cd "$(git rev-parse --show-toplevel)/app" && pnpm exec lint-staged
