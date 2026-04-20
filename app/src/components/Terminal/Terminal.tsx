@@ -96,23 +96,24 @@ export function Terminal({ cwd }: TerminalProps) {
     };
   }, [cwd, restartKey]);
 
-  if (exitInfo) {
-    return (
-      <div className="flex h-full items-center justify-center bg-zinc-900 text-zinc-400">
-        <div className="text-center">
-          <p className="font-mono text-sm">
-            {t.terminal.exitedTitle}（exit code: {exitInfo.code}）
-          </p>
-          <button
-            onClick={() => setRestartKey((k) => k + 1)}
-            className="mt-3 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
-          >
-            {t.terminal.restart}
-          </button>
+  return (
+    <div className="relative h-full w-full bg-zinc-900">
+      <div ref={containerRef} className="h-full w-full p-2" />
+      {exitInfo && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/95 text-zinc-400">
+          <div className="text-center">
+            <p className="font-mono text-sm">
+              {t.terminal.exitedTitle}（exit code: {exitInfo.code}）
+            </p>
+            <button
+              onClick={() => setRestartKey((k) => k + 1)}
+              className="mt-3 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+            >
+              {t.terminal.restart}
+            </button>
+          </div>
         </div>
-      </div>
-    );
-  }
-
-  return <div ref={containerRef} className="h-full w-full bg-zinc-900 p-2" />;
+      )}
+    </div>
+  );
 }
