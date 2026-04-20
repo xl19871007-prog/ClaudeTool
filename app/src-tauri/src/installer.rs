@@ -97,11 +97,44 @@ async fn resolve_git_installer() -> Result<(String, String, Option<u64>)> {
 }
 
 /// Stream-download a URL to a temp file, emitting progress events.
+/// Wraps `download_once` with one full-restart retry — proxies and GitHub
+/// CDN often kill connections mid-stream, and a single retry recovers
+/// most of those without forcing the user to do anything.
 async fn download_to_temp(
     app: &AppHandle,
     url: &str,
     expected_size: Option<u64>,
     suggested_filename: &str,
+) -> Result<PathBuf> {
+    let mut last_err: Option<AppError> = None;
+    for attempt in 1..=2 {
+        match download_once(app, url, expected_size, suggested_filename, attempt).await {
+            Ok(path) => return Ok(path),
+            Err(e) => {
+                emit(
+                    app,
+                    InstallEvent::Log {
+                        line: format!(
+                            "[download] attempt {attempt}/2 failed: {e}"
+                        ),
+                    },
+                );
+                last_err = Some(e);
+                if attempt == 1 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+    Err(last_err.expect("loop ran at least once"))
+}
+
+async fn download_once(
+    app: &AppHandle,
+    url: &str,
+    expected_size: Option<u64>,
+    suggested_filename: &str,
+    attempt: u32,
 ) -> Result<PathBuf> {
     use std::time::Instant;
     use tokio::io::AsyncWriteExt;
@@ -115,26 +148,43 @@ async fn download_to_temp(
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now();
 
-    while let Some(chunk) = resp.chunk().await? {
-        file.write_all(&chunk).await?;
-        downloaded += chunk.len() as u64;
-        // Throttle progress events to ~10 Hz so the UI doesn't drown.
-        if last_emit.elapsed().as_millis() >= 100 {
-            emit(
-                app,
-                InstallEvent::Downloading {
-                    downloaded_bytes: downloaded,
-                    total_bytes: total,
-                    message: format!(
-                        "下载中 {:.1}MB{}",
-                        downloaded as f64 / 1_048_576.0,
-                        total
-                            .map(|t| format!(" / {:.1}MB", t as f64 / 1_048_576.0))
-                            .unwrap_or_default()
-                    ),
-                },
-            );
-            last_emit = Instant::now();
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                file.write_all(&chunk).await?;
+                downloaded += chunk.len() as u64;
+                if last_emit.elapsed().as_millis() >= 100 {
+                    emit(
+                        app,
+                        InstallEvent::Downloading {
+                            downloaded_bytes: downloaded,
+                            total_bytes: total,
+                            message: format!(
+                                "下载中 {:.1}MB{}{}",
+                                downloaded as f64 / 1_048_576.0,
+                                total
+                                    .map(|t| format!(" / {:.1}MB", t as f64 / 1_048_576.0))
+                                    .unwrap_or_default(),
+                                if attempt > 1 { format!("（第 {attempt} 次尝试）") } else { String::new() }
+                            ),
+                        },
+                    );
+                    last_emit = Instant::now();
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                emit(
+                    app,
+                    InstallEvent::Log {
+                        line: format!(
+                            "[download] chunk error after {:.1}MB: {e}",
+                            downloaded as f64 / 1_048_576.0
+                        ),
+                    },
+                );
+                return Err(AppError::from(e));
+            }
         }
     }
     file.flush().await?;
@@ -332,7 +382,13 @@ pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
                 &app,
                 InstallEvent::Failed {
                     stage_id: "download".into(),
-                    message: format!("下载失败：{e}"),
+                    message: format!(
+                        "下载失败：{e}\n\n常见原因：\n\
+                        1) 代理对 GitHub 大文件下载支持不稳定（GitHub release 会重定向到 objects.githubusercontent.com）\n\
+                        2) 代理软件用 sysproxy 模式时，对长连接易中断；建议改用 TUN 模式\n\
+                        3) 网络瞬时抖动\n\n\
+                        可点「手动下载」直接去 git-scm.com 下载安装。"
+                    ),
                     recoverable: true,
                 },
             );

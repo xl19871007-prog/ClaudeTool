@@ -13,13 +13,16 @@ pub fn client() -> Client {
 
     // ADR-018: honor user-configured proxy for in-process HTTP (network probe,
     // GitHub Releases API, Git installer download).
-    if let Some(url) = cfg.proxy.https.as_ref().filter(|s| !s.is_empty()) {
-        if let Ok(p) = reqwest::Proxy::https(url) {
-            builder = builder.proxy(p);
-        }
-    }
-    if let Some(url) = cfg.proxy.http.as_ref().filter(|s| !s.is_empty()) {
-        if let Ok(p) = reqwest::Proxy::http(url) {
+    // Use Proxy::all() so the proxy survives 302 redirects to other subdomains
+    // (e.g. github.com → objects.githubusercontent.com for release assets).
+    let proxy_url = cfg
+        .proxy
+        .https
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .or(cfg.proxy.http.as_ref().filter(|s| !s.is_empty()));
+    if let Some(url) = proxy_url {
+        if let Ok(p) = reqwest::Proxy::all(url) {
             builder = builder.proxy(p);
         }
     }
