@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 pub fn client() -> Client {
     let cfg = config::load();
-    // 10s is roomy enough for slow VPN hops without making the user feel
-    // the app is stuck. Per-call retry happens at the env_checker layer.
+    // 30s roomy enough for slow VPN hops + large file downloads. Per-call
+    // retry with exponential backoff happens at the env_checker / installer layer.
     let mut builder = Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .user_agent(concat!("ClaudeTool/", env!("CARGO_PKG_VERSION")));
 
     // ADR-018: honor user-configured proxy for in-process HTTP (network probe,

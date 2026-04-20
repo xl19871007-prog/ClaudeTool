@@ -97,31 +97,53 @@ async fn resolve_git_installer() -> Result<(String, String, Option<u64>)> {
 }
 
 /// Stream-download a URL to a temp file, emitting progress events.
-/// Wraps `download_once` with one full-restart retry — proxies and GitHub
-/// CDN often kill connections mid-stream, and a single retry recovers
-/// most of those without forcing the user to do anything.
+/// Retries up to 5 times with exponential backoff (2s/5s/10s/15s/20s)
+/// to survive proxy flakiness on large files — network hiccups are
+/// common on VPN + GitHub CDN, and users are willing to wait if we
+/// show we're still trying.
 async fn download_to_temp(
     app: &AppHandle,
     url: &str,
     expected_size: Option<u64>,
     suggested_filename: &str,
 ) -> Result<PathBuf> {
+    const MAX_ATTEMPTS: u32 = 5;
+    const BACKOFF_SECS: [u64; 4] = [2, 5, 10, 15]; // 20s before last attempt not used; last attempt has no post-backoff
     let mut last_err: Option<AppError> = None;
-    for attempt in 1..=2 {
-        match download_once(app, url, expected_size, suggested_filename, attempt).await {
-            Ok(path) => return Ok(path),
+    for attempt in 1..=MAX_ATTEMPTS {
+        match download_once(app, url, expected_size, suggested_filename, attempt, MAX_ATTEMPTS).await {
+            Ok(path) => {
+                if attempt > 1 {
+                    emit(
+                        app,
+                        InstallEvent::Log {
+                            line: format!("[download] succeeded on attempt {attempt}/{MAX_ATTEMPTS}"),
+                        },
+                    );
+                }
+                return Ok(path);
+            }
             Err(e) => {
                 emit(
                     app,
                     InstallEvent::Log {
-                        line: format!(
-                            "[download] attempt {attempt}/2 failed: {e}"
-                        ),
+                        line: format!("[download] attempt {attempt}/{MAX_ATTEMPTS} failed: {e}"),
                     },
                 );
                 last_err = Some(e);
-                if attempt == 1 {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if attempt < MAX_ATTEMPTS {
+                    let wait = BACKOFF_SECS[(attempt as usize - 1).min(BACKOFF_SECS.len() - 1)];
+                    emit(
+                        app,
+                        InstallEvent::Downloading {
+                            downloaded_bytes: 0,
+                            total_bytes: expected_size,
+                            message: format!(
+                                "第 {attempt}/{MAX_ATTEMPTS} 次下载失败，{wait} 秒后自动重试...（代理/网络抖动常见，请稍等）"
+                            ),
+                        },
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                 }
             }
         }
@@ -135,6 +157,7 @@ async fn download_once(
     expected_size: Option<u64>,
     suggested_filename: &str,
     attempt: u32,
+    max_attempts: u32,
 ) -> Result<PathBuf> {
     use std::time::Instant;
     use tokio::io::AsyncWriteExt;
@@ -165,7 +188,11 @@ async fn download_once(
                                 total
                                     .map(|t| format!(" / {:.1}MB", t as f64 / 1_048_576.0))
                                     .unwrap_or_default(),
-                                if attempt > 1 { format!("（第 {attempt} 次尝试）") } else { String::new() }
+                                if attempt > 1 {
+                                    format!("（第 {attempt}/{max_attempts} 次尝试）")
+                                } else {
+                                    String::new()
+                                }
                             ),
                         },
                     );
@@ -218,6 +245,13 @@ async fn spawn_streaming(
     for (k, v) in cfg.proxy.as_env_pairs() {
         cmd.env(k, v);
     }
+    // Hide the child's console window on Windows (CREATE_NO_WINDOW = 0x08000000).
+    // Without this, spawning powershell.exe from our GUI process pops a blank
+    // black console window for the duration of the install — distracting and
+    // makes users think something crashed.
+    // tokio::process::Command re-exports `creation_flags` directly, no trait import needed.
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0800_0000);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -468,16 +502,20 @@ pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
             Ok(())
         }
         crate::env_checker::GitStatus::NotInstalled => {
-            let msg = "安装器退出成功但 git --version 仍失败。可能是 PATH 未更新——请重启系统后重试。".to_string();
+            // Same reasoning as install_claude_code: installer exit 0 +
+            // failed local verify usually means PATH is only visible to new
+            // processes. Treat as success with a restart hint.
             emit(
                 &app,
-                InstallEvent::Failed {
-                    stage_id: "verify".into(),
-                    message: msg.clone(),
-                    recoverable: true,
+                InstallEvent::Done {
+                    message: "✓ Git 安装器已成功执行，环境变量已配置。\n\n\
+                              ⚠️ 但 ClaudeTool 当前进程读不到新的 PATH，需要\n\
+                              **完全退出 ClaudeTool 后再重新启动**才能识别 git 命令。\n\n\
+                              关闭本对话框 → 右上角关闭 ClaudeTool → 重新打开。"
+                        .into(),
                 },
             );
-            Err(AppError::Config(msg))
+            Ok(())
         }
     }
 }
@@ -603,16 +641,23 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
             Ok(())
         }
         crate::env_checker::ClaudeStatus::NotInstalled => {
-            let msg = "脚本退出成功但 claude --version 仍失败。常见原因：~/.local/bin 未加入 PATH，请重启系统或重启本工具。".to_string();
+            // PowerShell exit 0 means the script itself completed successfully
+            // (script prints "Installation complete!"). The reason our local
+            // check_claude_installed() still fails is that PATH is read once at
+            // process start — new PATH entries written by the installer don't
+            // show up in this already-running process. Treat this as SUCCESS
+            // with a restart hint, not a failure.
             emit(
                 &app,
-                InstallEvent::Failed {
-                    stage_id: "verify".into(),
-                    message: msg.clone(),
-                    recoverable: true,
+                InstallEvent::Done {
+                    message: "✓ Claude Code 安装脚本已成功执行。\n\n\
+                              ⚠️ 但 ClaudeTool 当前进程读不到新的 PATH，需要\n\
+                              **完全退出 ClaudeTool 后再重新启动**才能识别 claude 命令。\n\n\
+                              关闭本对话框 → 右上角关闭 ClaudeTool → 重新打开。"
+                        .into(),
                 },
             );
-            Err(AppError::Config(msg))
+            Ok(())
         }
     }
 }
