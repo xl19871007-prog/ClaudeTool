@@ -1,0 +1,41 @@
+# Doc template (managed separately, not part of project)
+AI开发文档模板/
+
+# Claude Code per-user settings (do not commit)
+.claude/settings.local.json
+
+# Tauri / Rust
+app/src-tauri/target/
+**/*.rs.bk
+**/Cargo.lock.bak
+
+# Node / Vite
+app/node_modules/
+app/dist/
+app/.vite/
+app/build/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local environment
+*.local
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Build outputs
+*.exe
+*.dmg
+*.deb
+*.AppImage
+release/
