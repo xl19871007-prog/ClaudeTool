@@ -1,6 +1,7 @@
 export const t = {
   topbar: {
     selectFolder: '未选择文件夹',
+    changeFolder: '切换文件夹',
     claudeStatus: 'Claude',
     network: '网络',
     commands: '命令',
@@ -17,7 +18,7 @@ export const t = {
   },
   terminal: {
     placeholderTitle: '$ claude',
-    placeholderSubtitle: '终端区将在 M2 接入 xterm.js + tauri-plugin-pty',
+    placeholderSubtitle: '点左上角「未选择文件夹」选个项目目录开始对话',
     exitedTitle: 'Claude 已退出',
     restart: '点击重启',
   },
