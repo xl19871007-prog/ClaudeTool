@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Workbench } from '@/pages/Workbench';
 import { ReadinessWizard } from '@/components/ReadinessWizard';
 import { LoginPromptDialog } from '@/components/LoginPromptDialog';
+import { CommandPanel } from '@/components/CommandPanel/CommandPanel';
+import { SkillsPanel } from '@/components/SkillsPanel/SkillsPanel';
 import { useEnv } from '@/store/env';
 
 export default function App() {
@@ -18,6 +20,8 @@ export default function App() {
       <Workbench />
       <ReadinessWizard />
       <LoginPromptDialog />
+      <CommandPanel />
+      <SkillsPanel />
     </>
   );
 }

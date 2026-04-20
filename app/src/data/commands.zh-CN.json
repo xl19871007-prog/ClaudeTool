@@ -1,0 +1,343 @@
+{
+  "version": 1,
+  "recordedAt": "2026-04-20",
+  "categories": {
+    "session": "会话",
+    "auth": "认证",
+    "model": "模型与权限",
+    "plugin": "插件 / Skills",
+    "mcp": "MCP",
+    "slash": "斜杠命令",
+    "debug": "调试"
+  },
+  "commands": [
+    {
+      "id": "claude-new",
+      "category": "session",
+      "command": "claude",
+      "purpose": "在当前目录启动一次新对话",
+      "example": "claude",
+      "tip": "默认进入交互模式。本工具的「新会话」按钮就是它。"
+    },
+    {
+      "id": "claude-with-prompt",
+      "category": "session",
+      "command": "claude \"<query>\"",
+      "purpose": "启动会话并直接发出第一条问题",
+      "example": "claude \"帮我看下这个项目结构\"",
+      "tip": "省一次回车。<query> 部分要替换成你的真实问题。"
+    },
+    {
+      "id": "claude-continue",
+      "category": "session",
+      "command": "claude --continue",
+      "purpose": "继续当前目录最近一次对话",
+      "example": "claude -c",
+      "tip": "本工具的「继续上次」按钮就是它。短写 -c。"
+    },
+    {
+      "id": "claude-resume",
+      "category": "session",
+      "command": "claude --resume <session-id-or-name>",
+      "purpose": "按 ID 或名字恢复一次旧对话",
+      "example": "claude --resume auth-refactor",
+      "tip": "本工具历史侧栏点击就是它。<session-id-or-name> 替换成会话标识。"
+    },
+    {
+      "id": "resume-picker",
+      "category": "session",
+      "command": "claude --resume",
+      "purpose": "在终端里弹出会话选择器",
+      "example": "claude -r",
+      "tip": "短写 -r。本工具用 GUI 列表替代了这个 picker。"
+    },
+    {
+      "id": "fork-session",
+      "category": "session",
+      "command": "claude --resume <id> --fork-session",
+      "purpose": "从某次会话分叉一份新对话，不覆盖原会话",
+      "example": "claude --resume abc123 --fork-session",
+      "tip": "本工具历史侧栏的「分叉一份」按钮就是它。"
+    },
+    {
+      "id": "name-session",
+      "category": "session",
+      "command": "claude -n \"<name>\"",
+      "purpose": "给本次会话起一个好记的名字",
+      "example": "claude -n \"重构 auth 模块\"",
+      "tip": "之后可以用 claude --resume \"重构 auth 模块\" 直接续。"
+    },
+    {
+      "id": "add-dir",
+      "category": "session",
+      "command": "claude --add-dir <path>",
+      "purpose": "把额外的目录纳入 Claude 可读写范围",
+      "example": "claude --add-dir ../shared-lib",
+      "tip": "适合 monorepo 跨 package 工作。"
+    },
+    {
+      "id": "auth-login",
+      "category": "auth",
+      "command": "claude auth login",
+      "purpose": "登录 Anthropic 账号（OAuth）",
+      "example": "claude auth login",
+      "tip": "首次必跑。会打开浏览器完成 OAuth。本工具检测到未登录会提示。"
+    },
+    {
+      "id": "auth-status",
+      "category": "auth",
+      "command": "claude auth status",
+      "purpose": "查看当前登录状态",
+      "example": "claude auth status",
+      "tip": "本工具顶栏的 Claude 状态指示就用了它。"
+    },
+    {
+      "id": "auth-logout",
+      "category": "auth",
+      "command": "claude auth logout",
+      "purpose": "退出当前账号",
+      "example": "claude auth logout",
+      "tip": "切换账号或排查登录问题时用。"
+    },
+    {
+      "id": "auth-console",
+      "category": "auth",
+      "command": "claude auth login --console",
+      "purpose": "用 Anthropic Console 账号登录（按量计费而非订阅）",
+      "example": "claude auth login --console",
+      "tip": "需要走 API key 计费的开发者用。"
+    },
+    {
+      "id": "model",
+      "category": "model",
+      "command": "claude --model <name>",
+      "purpose": "本次会话指定模型",
+      "example": "claude --model opus",
+      "tip": "可选别名 sonnet / opus / haiku，或完整模型名如 claude-opus-4-7。"
+    },
+    {
+      "id": "effort",
+      "category": "model",
+      "command": "claude --effort <level>",
+      "purpose": "本次会话设定推理强度",
+      "example": "claude --effort high",
+      "tip": "可选 low/medium/high/xhigh/max（具体支持随模型）。强度高 = 慢但更深思熟虑。"
+    },
+    {
+      "id": "plan-mode",
+      "category": "model",
+      "command": "claude --permission-mode plan",
+      "purpose": "进入 plan 模式：Claude 只读，先出计划再改代码",
+      "example": "claude --permission-mode plan",
+      "tip": "改大动作前用，避免 Claude 直接动手。会话内按 Shift+Tab 也可切换。"
+    },
+    {
+      "id": "auto-mode",
+      "category": "model",
+      "command": "claude --permission-mode auto",
+      "purpose": "进入 auto 模式：Claude 自行判断常规操作权限",
+      "example": "claude --permission-mode auto",
+      "tip": "信任度高的项目用，少打断。会话内按 Shift+Tab 切换。"
+    },
+    {
+      "id": "tools-restrict",
+      "category": "model",
+      "command": "claude --tools \"<list>\"",
+      "purpose": "限制本次会话可用的工具",
+      "example": "claude --tools \"Read,Edit\"",
+      "tip": "想让 Claude 只读不写：--tools \"Read\"。<list> 替换成工具名列表。"
+    },
+    {
+      "id": "worktree",
+      "category": "model",
+      "command": "claude -w <branch>",
+      "purpose": "在 git worktree 隔离副本里工作",
+      "example": "claude -w feature-auth",
+      "tip": "并行多分支不打架。仓库下 .claude/worktrees/<branch>。"
+    },
+    {
+      "id": "from-pr",
+      "category": "model",
+      "command": "claude --from-pr <pr-number-or-url>",
+      "purpose": "恢复某 PR 关联的 Claude 会话",
+      "example": "claude --from-pr 123",
+      "tip": "团队协作场景。需 PR 是 gh pr create 创建。"
+    },
+    {
+      "id": "plugin-install",
+      "category": "plugin",
+      "command": "claude plugin install <name>@<marketplace>",
+      "purpose": "从插件市场装一个插件",
+      "example": "claude plugin install code-review@claude-plugins-official",
+      "tip": "插件 = 一组 Skills 的打包。<name>@<marketplace> 替换成实际值。"
+    },
+    {
+      "id": "plugin-list",
+      "category": "plugin",
+      "command": "claude plugin list",
+      "purpose": "列出本机已装的插件",
+      "example": "claude plugin list",
+      "tip": "本工具的 Skills 面板会用到这个数据源。"
+    },
+    {
+      "id": "marketplace-add",
+      "category": "plugin",
+      "command": "claude plugin marketplace add <repo>",
+      "purpose": "注册一个新的插件市场（GitHub 仓库）",
+      "example": "claude plugin marketplace add anthropics/skills",
+      "tip": "注册后才能从该市场 install。<repo> 是 owner/repo。"
+    },
+    {
+      "id": "agents",
+      "category": "plugin",
+      "command": "claude agents",
+      "purpose": "列出已配置的 subagent",
+      "example": "claude agents",
+      "tip": "Subagent = 可委派的专门子任务执行者。"
+    },
+    {
+      "id": "mcp",
+      "category": "mcp",
+      "command": "claude mcp",
+      "purpose": "管理 MCP 服务器（Claude 的工具协议）",
+      "example": "claude mcp",
+      "tip": "MCP = 给 Claude 接外部服务的标准协议。详见官方 mcp 文档。"
+    },
+    {
+      "id": "mcp-config",
+      "category": "mcp",
+      "command": "claude --mcp-config <path>",
+      "purpose": "本次会话从指定文件加载 MCP 配置",
+      "example": "claude --mcp-config ./mcp.json",
+      "tip": "调试 MCP 服务器时用。<path> 替换成你的 mcp.json 路径。"
+    },
+    {
+      "id": "slash-init",
+      "category": "slash",
+      "command": "/init",
+      "purpose": "初始化项目 CLAUDE.md（让 Claude 了解项目）",
+      "example": "/init",
+      "tip": "新项目第一次用 Claude 必跑。Claude 会扫描代码生成项目说明。"
+    },
+    {
+      "id": "slash-help",
+      "category": "slash",
+      "command": "/help",
+      "purpose": "列出当前会话所有可用斜杠命令",
+      "example": "/help",
+      "tip": "包含用户自定义命令与 Skills 注册的命令。最权威的发现入口。"
+    },
+    {
+      "id": "slash-compact",
+      "category": "slash",
+      "command": "/compact",
+      "purpose": "压缩当前对话上下文，释放 token 空间",
+      "example": "/compact",
+      "tip": "对话超过 30 轮或感觉变慢时用。Claude 会保留要点摘要。"
+    },
+    {
+      "id": "slash-clear",
+      "category": "slash",
+      "command": "/clear",
+      "purpose": "清空当前对话上下文，重新开始",
+      "example": "/clear",
+      "tip": "话题切换时用。比 /compact 更彻底，丢失上下文。"
+    },
+    {
+      "id": "slash-cost",
+      "category": "slash",
+      "command": "/cost",
+      "purpose": "查看本次会话已花费 token 与估算费用",
+      "example": "/cost",
+      "tip": "想了解花销时用。"
+    },
+    {
+      "id": "slash-context",
+      "category": "slash",
+      "command": "/context",
+      "purpose": "查看当前已用 / 可用 token 与分类占用",
+      "example": "/context",
+      "tip": "上下文将满时用，决定要不要 /compact。"
+    },
+    {
+      "id": "slash-model",
+      "category": "slash",
+      "command": "/model",
+      "purpose": "会话内切换模型",
+      "example": "/model",
+      "tip": "可在 sonnet / opus / haiku 之间切，无需重启会话。"
+    },
+    {
+      "id": "slash-review",
+      "category": "slash",
+      "command": "/review",
+      "purpose": "让 Claude 评审你当前的代码改动",
+      "example": "/review",
+      "tip": "PR 提交前自检。会综合 diff 给出建议。"
+    },
+    {
+      "id": "slash-resume-inline",
+      "category": "slash",
+      "command": "/resume",
+      "purpose": "在已开会话里跳到另一次历史会话",
+      "example": "/resume",
+      "tip": "弹出 picker 让你选。本工具用 GUI 侧栏替代了它。"
+    },
+    {
+      "id": "slash-rename",
+      "category": "slash",
+      "command": "/rename <name>",
+      "purpose": "给当前会话起 / 改名字",
+      "example": "/rename 重构 auth",
+      "tip": "改完后续 claude --resume \"重构 auth\" 可直接续。<name> 替换成你想要的。"
+    },
+    {
+      "id": "slash-exit",
+      "category": "slash",
+      "command": "/exit",
+      "purpose": "退出当前 Claude 会话",
+      "example": "/exit",
+      "tip": "本工具退出后会显示「重启」按钮。"
+    },
+    {
+      "id": "slash-vim",
+      "category": "slash",
+      "command": "/vim",
+      "purpose": "把输入框切换到 Vim 键位",
+      "example": "/vim",
+      "tip": "Vim 用户友好。"
+    },
+    {
+      "id": "debug-version",
+      "category": "debug",
+      "command": "claude --version",
+      "purpose": "打印 Claude Code 版本号",
+      "example": "claude -v",
+      "tip": "本工具顶栏的版本号就用了它。"
+    },
+    {
+      "id": "debug-verbose",
+      "category": "debug",
+      "command": "claude --verbose",
+      "purpose": "本次会话开启详细输出",
+      "example": "claude --verbose",
+      "tip": "看 Claude 每一轮做了啥。排查问题用。"
+    },
+    {
+      "id": "debug-debug",
+      "category": "debug",
+      "command": "claude --debug \"<categories>\"",
+      "purpose": "开 debug 日志，可按类别过滤",
+      "example": "claude --debug \"api,mcp\"",
+      "tip": "<categories> 可填 api / mcp / hooks 等，逗号分隔。"
+    },
+    {
+      "id": "debug-update",
+      "category": "debug",
+      "command": "claude update",
+      "purpose": "升级 Claude Code 到最新版",
+      "example": "claude update",
+      "tip": "升级后建议重启本工具，让它重新检测版本。"
+    }
+  ]
+}

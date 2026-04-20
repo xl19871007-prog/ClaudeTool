@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { spawn, type IPty } from 'tauri-pty';
 import '@xterm/xterm/css/xterm.css';
+import { useTerminalInput } from '@/store/terminalInput';
 import { t } from '@/i18n/zh-CN';
 
 interface TerminalProps {
@@ -15,8 +16,13 @@ interface TerminalProps {
 
 export function Terminal({ cwd, args, epoch }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const ptyRef = useRef<IPty | null>(null);
+  const termRef = useRef<XTerm | null>(null);
   const [exitInfo, setExitInfo] = useState<{ code: number } | null>(null);
   const [restartKey, setRestartKey] = useState(0);
+
+  const pendingInput = useTerminalInput((s) => s.pending);
+  const consumeInput = useTerminalInput((s) => s.consume);
 
   useEffect(() => {
     setExitInfo(null);
@@ -41,6 +47,7 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
 
     term.open(containerRef.current);
     fitAddon.fit();
+    termRef.current = term;
 
     let pty: IPty | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,6 +59,7 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
         cols: term.cols,
         rows: term.rows,
       });
+      ptyRef.current = pty;
 
       pty.onData((data) => {
         term.write(data);
@@ -64,6 +72,7 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
       pty.onExit(({ exitCode }) => {
         if (!disposed) {
           setExitInfo({ code: exitCode });
+          ptyRef.current = null;
         }
       });
     } catch (err) {
@@ -95,9 +104,28 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
       } catch {
         // ignore
       }
+      ptyRef.current = null;
+      termRef.current = null;
       term.dispose();
     };
   }, [cwd, args, epoch, restartKey]);
+
+  // Consume injected input (from CommandPanel "试一试").
+  // Writes to PTY without trailing newline, lets user verify before pressing Enter.
+  useEffect(() => {
+    if (!pendingInput) return;
+    if (!ptyRef.current) {
+      consumeInput();
+      return;
+    }
+    try {
+      ptyRef.current.write(pendingInput.text);
+      termRef.current?.focus();
+    } catch (err) {
+      console.warn('PTY inject failed', err);
+    }
+    consumeInput();
+  }, [pendingInput, consumeInput]);
 
   return (
     <div className="relative h-full w-full bg-zinc-900">

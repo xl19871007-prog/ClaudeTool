@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "recordedAt": "2026-04-20",
+  "source": "https://github.com/anthropics/skills",
+  "note": "Curated subset of Anthropic's official skills repository (ADR-015). Re-sync per release.",
+  "skills": [
+    {
+      "name": "pdf",
+      "description": "Generate, edit, and extract content from PDF files",
+      "category": "document",
+      "repoPath": "document-skills/pdf"
+    },
+    {
+      "name": "docx",
+      "description": "Create and modify Microsoft Word documents",
+      "category": "document",
+      "repoPath": "document-skills/docx"
+    },
+    {
+      "name": "xlsx",
+      "description": "Read, write, and analyze Excel spreadsheets",
+      "category": "document",
+      "repoPath": "document-skills/xlsx"
+    },
+    {
+      "name": "pptx",
+      "description": "Build and edit PowerPoint presentations",
+      "category": "document",
+      "repoPath": "document-skills/pptx"
+    },
+    {
+      "name": "code-review",
+      "description": "Conduct rigorous code reviews on diffs, files, or whole modules",
+      "category": "engineering",
+      "repoPath": "engineering-skills/code-review"
+    },
+    {
+      "name": "git-worktree",
+      "description": "Manage parallel work via git worktrees, including cleanup",
+      "category": "engineering",
+      "repoPath": "engineering-skills/git-worktree"
+    },
+    {
+      "name": "test-writer",
+      "description": "Write comprehensive unit and integration tests for given code",
+      "category": "engineering",
+      "repoPath": "engineering-skills/test-writer"
+    },
+    {
+      "name": "refactor-helper",
+      "description": "Identify smells, suggest refactors, apply them safely with tests",
+      "category": "engineering",
+      "repoPath": "engineering-skills/refactor-helper"
+    },
+    {
+      "name": "security-review",
+      "description": "Audit code changes for OWASP-style vulnerabilities and secrets",
+      "category": "engineering",
+      "repoPath": "engineering-skills/security-review"
+    },
+    {
+      "name": "data-analyst",
+      "description": "Analyze CSV/Parquet datasets, produce summary statistics and charts",
+      "category": "data",
+      "repoPath": "data-skills/data-analyst"
+    },
+    {
+      "name": "sql-builder",
+      "description": "Translate natural-language questions into SQL queries with explanations",
+      "category": "data",
+      "repoPath": "data-skills/sql-builder"
+    },
+    {
+      "name": "api-tester",
+      "description": "Build and run API tests against REST/GraphQL endpoints",
+      "category": "engineering",
+      "repoPath": "engineering-skills/api-tester"
+    },
+    {
+      "name": "release-notes",
+      "description": "Generate release notes from git log, group by feat/fix/chore",
+      "category": "productivity",
+      "repoPath": "productivity-skills/release-notes"
+    },
+    {
+      "name": "meeting-notes",
+      "description": "Summarize meeting transcripts and extract action items",
+      "category": "productivity",
+      "repoPath": "productivity-skills/meeting-notes"
+    },
+    {
+      "name": "find-skills",
+      "description": "Search and discover other Claude skills across registries",
+      "category": "discovery",
+      "repoPath": "discovery-skills/find-skills"
+    }
+  ]
+}

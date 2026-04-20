@@ -4,6 +4,7 @@ use crate::env_checker::{
 };
 use crate::error::Result;
 use crate::history_parser::{self, SessionMeta};
+use crate::skills_scanner::{self, SkillsReport};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
@@ -101,4 +102,24 @@ pub async fn list_sessions(workdir: String, app: AppHandle) -> Result<Vec<Sessio
     });
 
     Ok(sessions)
+}
+
+#[tauri::command]
+pub async fn list_skills(workdir: Option<String>) -> Result<SkillsReport> {
+    tokio::task::spawn_blocking(move || {
+        let workdir_path = workdir.as_ref().map(PathBuf::from);
+        skills_scanner::list_all(workdir_path.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Ok(SkillsReport {
+        installed: Vec::new(),
+        recommended: Vec::new(),
+    }))
+}
+
+#[tauri::command]
+pub async fn read_skill_md(path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || skills_scanner::read_skill_md(&PathBuf::from(&path)))
+        .await
+        .unwrap_or_else(|_| Ok(String::new()))
 }

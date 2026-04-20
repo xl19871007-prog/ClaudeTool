@@ -3,12 +3,15 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useWorkbench, pathBasename } from '@/store/workbench';
 import { useEnv } from '@/store/env';
+import { usePanels } from '@/store/panels';
 import { t } from '@/i18n/zh-CN';
 
 export function TopBar() {
   const cwd = useWorkbench((s) => s.cwd);
   const setCwd = useWorkbench((s) => s.setCwd);
   const report = useEnv((s) => s.report);
+  const togglePanel = usePanels((s) => s.toggle);
+  const activePanel = usePanels((s) => s.open);
 
   const handleSelectFolder = async () => {
     try {
@@ -90,15 +93,23 @@ export function TopBar() {
 
       <div className="ml-auto flex items-center gap-1">
         <button
-          className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-muted"
+          onClick={() => togglePanel('commands')}
+          className={`flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-muted ${
+            activePanel === 'commands' ? 'bg-muted' : ''
+          }`}
           aria-label={t.topbar.commands}
+          aria-pressed={activePanel === 'commands'}
         >
           <BookOpen className="h-4 w-4" />
           <span>{t.topbar.commands}</span>
         </button>
         <button
-          className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-muted"
+          onClick={() => togglePanel('skills')}
+          className={`flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-muted ${
+            activePanel === 'skills' ? 'bg-muted' : ''
+          }`}
           aria-label={t.topbar.skills}
+          aria-pressed={activePanel === 'skills'}
         >
           <Package className="h-4 w-4" />
           <span>{t.topbar.skills}</span>
