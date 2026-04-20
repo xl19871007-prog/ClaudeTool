@@ -3,6 +3,29 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Build a Command that won't flash a console window on Windows.
+///
+/// Why: Tauri GUI processes have no attached console. When we spawn a child
+/// via `silent_command(...)`, Windows allocates a fresh console for the child
+/// by default. This causes two symptoms observed on user white machines:
+///   1. A brief black console window flash.
+///   2. For some native children (notably claude.exe as shipped by Anthropic),
+///      this parent-less console allocation triggers a DLL init failure during
+///      startup, surfacing as a Windows error dialog "应用程序无法正常启动
+///      (0xc0000142)". Setting CREATE_NO_WINDOW (0x08000000) makes Windows
+///      skip the console allocation entirely, which both hides the flash and
+///      avoids the init race that produces 0xc0000142.
+fn silent_command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ClaudeStatus {
@@ -87,7 +110,7 @@ pub fn check_git_installed() -> GitStatus {
 }
 
 fn run_git_version() -> Option<String> {
-    let output = Command::new("git").arg("--version").output().ok()?;
+    let output = silent_command("git").arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -100,7 +123,7 @@ fn find_git_path() -> Option<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let cmd = "which";
 
-    let output = Command::new(cmd).arg("git").output().ok()?;
+    let output = silent_command(cmd).arg("git").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -149,7 +172,7 @@ pub fn check_git_bash_env() -> GitBashEnvStatus {
 }
 
 fn run_claude_version() -> Option<String> {
-    let output = Command::new("claude").arg("--version").output().ok()?;
+    let output = silent_command("claude").arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -163,7 +186,7 @@ fn find_claude_path() -> Option<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let cmd = "which";
 
-    let output = Command::new(cmd).arg("claude").output().ok()?;
+    let output = silent_command(cmd).arg("claude").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -173,7 +196,7 @@ fn find_claude_path() -> Option<PathBuf> {
 }
 
 pub fn check_claude_auth_status() -> AuthStatus {
-    let output = match Command::new("claude").args(["auth", "status"]).output() {
+    let output = match silent_command("claude").args(["auth", "status"]).output() {
         Ok(o) => o,
         Err(_) => return AuthStatus::Unknown,
     };
