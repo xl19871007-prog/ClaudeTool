@@ -314,6 +314,51 @@ async fn set_git_bash_env_var(app: &AppHandle, bash_path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Append `%USERPROFILE%\.local\bin` to the user PATH if not already present.
+///
+/// Why this is needed: Anthropic's `irm https://claude.ai/install.ps1 | iex`
+/// script sometimes fails to modify the user PATH on Windows — it prints the
+/// warning "Native installation exists but C:\Users\...\.local\bin is not in
+/// your PATH" and leaves it to the user to add it manually. Without this entry
+/// in user PATH, even a ClaudeTool restart won't find `claude.exe` because the
+/// PATH inherited from the system genuinely lacks it.
+///
+/// We use PowerShell's `[Environment]::SetEnvironmentVariable` rather than
+/// `setx` because setx truncates the value to 1024 characters — a real risk
+/// when the existing user PATH is already long.
+async fn ensure_local_bin_in_path(app: &AppHandle) -> Result<()> {
+    emit(
+        app,
+        InstallEvent::Configuring {
+            message: "检查并补全 user PATH（%USERPROFILE%\\.local\\bin）...".into(),
+        },
+    );
+    // Single-line PS: read user PATH, add .local\bin if missing.
+    let script = "$bin = Join-Path $env:USERPROFILE '.local\\bin'; \
+                  $p = [Environment]::GetEnvironmentVariable('PATH','User'); \
+                  if ([string]::IsNullOrEmpty($p)) { $p = '' }; \
+                  $parts = $p.Split(';') | Where-Object { $_ -ne '' }; \
+                  if ($parts -notcontains $bin) { \
+                    $new = if ([string]::IsNullOrEmpty($p)) { $bin } else { \"$p;$bin\" }; \
+                    [Environment]::SetEnvironmentVariable('PATH', $new, 'User'); \
+                    Write-Host \"[path] appended $bin to user PATH\" \
+                  } else { \
+                    Write-Host \"[path] $bin already present in user PATH\" \
+                  }";
+    let code = spawn_streaming(
+        app,
+        "powershell.exe",
+        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+    )
+    .await?;
+    if code != 0 {
+        return Err(AppError::Config(format!(
+            "补全 user PATH 失败，PowerShell 退出码 {code}"
+        )));
+    }
+    Ok(())
+}
+
 /// Install Git for Windows end-to-end.
 /// Steps: resolve URL → download → spawn silent installer → set env var → verify.
 pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
@@ -624,6 +669,18 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
         return Err(AppError::Config(msg));
     }
 
+    // Anthropic's install script sometimes leaves ~/.local/bin out of user PATH
+    // and prints a manual-setup note. Proactively ensure it's registered so the
+    // next ClaudeTool launch (or any new shell) can find `claude.exe`.
+    if let Err(e) = ensure_local_bin_in_path(&app).await {
+        emit(
+            &app,
+            InstallEvent::Log {
+                line: format!("[path] 补全 PATH 失败（非致命，可手动添加）: {e}"),
+            },
+        );
+    }
+
     emit(
         &app,
         InstallEvent::Verifying {
@@ -641,18 +698,20 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
             Ok(())
         }
         crate::env_checker::ClaudeStatus::NotInstalled => {
-            // PowerShell exit 0 means the script itself completed successfully
-            // (script prints "Installation complete!"). The reason our local
-            // check_claude_installed() still fails is that PATH is read once at
-            // process start — new PATH entries written by the installer don't
-            // show up in this already-running process. Treat this as SUCCESS
-            // with a restart hint, not a failure.
+            // PowerShell exit 0 means the install script completed. In this
+            // branch our in-process PATH check still can't find claude.exe —
+            // this is expected because:
+            //   1. We just wrote ~/.local/bin to HKCU\Environment via
+            //      ensure_local_bin_in_path, but the current process holds a
+            //      PATH snapshot from launch time.
+            //   2. A ClaudeTool restart will re-read user PATH and pick it up.
+            // So: treat as success with an explicit restart hint.
             emit(
                 &app,
                 InstallEvent::Done {
-                    message: "✓ Claude Code 安装脚本已成功执行。\n\n\
-                              ⚠️ 但 ClaudeTool 当前进程读不到新的 PATH，需要\n\
-                              **完全退出 ClaudeTool 后再重新启动**才能识别 claude 命令。\n\n\
+                    message: "✓ Claude Code 已安装，~/.local/bin 已加入 user PATH。\n\n\
+                              ⚠️ ClaudeTool 当前进程持有旧的 PATH 快照，需要\n\
+                              **完全退出 ClaudeTool 再重新启动**才能识别 claude 命令。\n\n\
                               关闭本对话框 → 右上角关闭 ClaudeTool → 重新打开。"
                         .into(),
                 },
