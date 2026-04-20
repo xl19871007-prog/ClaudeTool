@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Copy, ExternalLink, ChevronLeft, Check, Play } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Copy, ExternalLink, ChevronLeft, Check, Play, Search } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { Drawer } from '@/components/ui/Drawer';
 import { usePanels } from '@/store/panels';
@@ -49,6 +49,7 @@ export function SkillsPanel() {
   const select = useSkills((s) => s.select);
 
   const [tab, setTab] = useState<'installed' | 'recommend'>('installed');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -58,6 +59,23 @@ export function SkillsPanel() {
 
   const installed = report?.installed ?? [];
   const recommended = report?.recommended ?? [];
+
+  const filterSkills = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return (list: SkillMeta[]) => list;
+    return (list: SkillMeta[]) =>
+      list.filter((s) => {
+        const bundled = (s.bundledSkills ?? [])
+          .map((b) => `${b.name} ${b.descriptionZh}`)
+          .join(' ');
+        const haystack =
+          `${s.name} ${s.description} ${s.pluginName ?? ''} ${s.category ?? ''} ${s.marketplaceOwnerLabel ?? ''} ${bundled}`.toLowerCase();
+        return haystack.includes(q);
+      });
+  }, [query]);
+
+  const filteredInstalled = filterSkills(installed);
+  const filteredRecommended = filterSkills(recommended);
 
   if (selected) {
     return (
@@ -78,6 +96,9 @@ export function SkillsPanel() {
     );
   }
 
+  const activeList = tab === 'installed' ? filteredInstalled : filteredRecommended;
+  const totalCount = tab === 'installed' ? installed.length : recommended.length;
+
   return (
     <Drawer open={open} onClose={close} title="Skills" widthClass="w-[520px]">
       <div className="flex border-b border-border">
@@ -87,6 +108,23 @@ export function SkillsPanel() {
         <TabBtn active={tab === 'recommend'} onClick={() => setTab('recommend')}>
           推荐 ({recommended.length})
         </TabBtn>
+      </div>
+      <div className="border-b border-border p-3">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索：plugin 名 / 描述 / bundled skill..."
+            className="w-full rounded border border-input bg-background py-1.5 pl-7 pr-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        {query && (
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            匹配 {activeList.length} / {totalCount} 条
+          </p>
+        )}
       </div>
       <div className="p-3">
         {loading && <p className="py-8 text-center text-xs text-muted-foreground">正在扫描...</p>}
@@ -102,20 +140,23 @@ export function SkillsPanel() {
             推荐列表为空（你已装完所有种子里的 plugin）
           </p>
         )}
-        {!loading && tab === 'installed' && installed.length > 0 && (
+        {!loading && totalCount > 0 && activeList.length === 0 && (
+          <p className="py-8 text-center text-xs text-muted-foreground">没有匹配的 skill</p>
+        )}
+        {!loading && tab === 'installed' && activeList.length > 0 && (
           <ul className="space-y-2">
-            {installed.map((s) => (
+            {activeList.map((s) => (
               <SkillCard key={s.id} skill={s} onClick={() => void select(s)} />
             ))}
           </ul>
         )}
-        {!loading && tab === 'recommend' && recommended.length > 0 && (
+        {!loading && tab === 'recommend' && activeList.length > 0 && (
           <>
             <p className="mb-2 text-[11px] text-muted-foreground">
               来自 Anthropic 官方 marketplace。每个 plugin 含一个或多个 skill。
             </p>
             <ul className="space-y-2">
-              {recommended.map((s) => (
+              {activeList.map((s) => (
                 <SkillCard key={s.id} skill={s} onClick={() => void select(s)} />
               ))}
             </ul>
