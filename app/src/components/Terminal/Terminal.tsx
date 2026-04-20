@@ -8,9 +8,12 @@ import { t } from '@/i18n/zh-CN';
 
 interface TerminalProps {
   cwd: string;
+  args: string[];
+  /** Bumped externally to remount/restart this Terminal */
+  epoch: number;
 }
 
-export function Terminal({ cwd }: TerminalProps) {
+export function Terminal({ cwd, args, epoch }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [exitInfo, setExitInfo] = useState<{ code: number } | null>(null);
   const [restartKey, setRestartKey] = useState(0);
@@ -44,7 +47,7 @@ export function Terminal({ cwd }: TerminalProps) {
     let disposed = false;
 
     try {
-      pty = spawn('claude', [], {
+      pty = spawn('claude', args, {
         cwd,
         cols: term.cols,
         rows: term.rows,
@@ -94,7 +97,7 @@ export function Terminal({ cwd }: TerminalProps) {
       }
       term.dispose();
     };
-  }, [cwd, restartKey]);
+  }, [cwd, args, epoch, restartKey]);
 
   return (
     <div className="relative h-full w-full bg-zinc-900">

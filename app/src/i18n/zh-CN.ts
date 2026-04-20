@@ -16,9 +16,17 @@ export const t = {
   history: {
     newSession: '新会话',
     continueLast: '继续上次',
+    continueLastTip: '相当于 claude --continue',
     searchPlaceholder: '搜索历史...',
     emptyTitle: '选个文件夹开始对话',
     emptySubtitle: '历史会话会出现在这里',
+    noSessionsTitle: '该项目还没有历史会话',
+    noSessionsSubtitle: '点上面「新会话」开始第一次对话',
+    noMatch: '没有匹配的会话',
+    loading: '正在扫描历史...',
+    turns: '轮',
+    fork: '分叉一份',
+    forkTip: '基于此会话新建分支，不覆盖原会话',
   },
   terminal: {
     placeholderTitle: '$ claude',

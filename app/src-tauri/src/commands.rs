@@ -3,7 +3,10 @@ use crate::env_checker::{
     self, AuthStatus, ClaudeStatus, NetworkStatus, UpdateInfo,
 };
 use crate::error::Result;
+use crate::history_parser::{self, SessionMeta};
 use serde::Serialize;
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,4 +56,49 @@ pub fn set_last_seen_version(value: String) -> Result<()> {
     let mut cfg = config::load();
     cfg.last_seen_version = Some(value);
     config::save(&cfg)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRefinePayload {
+    pub workdir: String,
+    pub session_id: String,
+    pub turn_count: u32,
+}
+
+#[tauri::command]
+pub async fn list_sessions(workdir: String, app: AppHandle) -> Result<Vec<SessionMeta>> {
+    let path = PathBuf::from(&workdir);
+    let workdir_for_task = workdir.clone();
+    let sessions =
+        tokio::task::spawn_blocking(move || history_parser::list_sessions_quick(&path))
+            .await
+            .unwrap_or_else(|_| Ok(Vec::new()))?;
+
+    // Spawn background refinement: emit one event per session as turnCount becomes known.
+    let session_ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
+    tauri::async_runtime::spawn(async move {
+        for session_id in session_ids {
+            let workdir = workdir_for_task.clone();
+            let id_for_task = session_id.clone();
+            let count = tokio::task::spawn_blocking(move || {
+                history_parser::refine_turn_count(&PathBuf::from(&workdir), &id_for_task)
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(turn_count) = count {
+                let _ = app.emit(
+                    "session-refined",
+                    SessionRefinePayload {
+                        workdir: workdir_for_task.clone(),
+                        session_id,
+                        turn_count,
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(sessions)
 }

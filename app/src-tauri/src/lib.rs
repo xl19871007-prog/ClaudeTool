@@ -6,6 +6,7 @@ mod config;
 mod env_checker;
 mod error;
 mod fs;
+mod history_parser;
 mod net;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,6 +20,7 @@ pub fn run() {
             commands::get_config,
             commands::set_suppress_login_prompt,
             commands::set_last_seen_version,
+            commands::list_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
