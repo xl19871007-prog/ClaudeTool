@@ -45,7 +45,12 @@ export function CommandPanel() {
   }, [query, activeCategory]);
 
   const handleTry = (cmd: string) => {
-    inject(cmd);
+    // ClaudeTool's terminal is a *Claude session*, not a bare shell.
+    // - Slash commands (/xxx) are native to the session → inject as-is.
+    // - Anything else (shell / `claude` subcommands) needs the `!` prefix
+    //   to escape into shell context, otherwise Claude treats it as text.
+    const text = cmd.trimStart().startsWith('/') ? cmd : `!${cmd}`;
+    inject(text);
     close();
   };
 

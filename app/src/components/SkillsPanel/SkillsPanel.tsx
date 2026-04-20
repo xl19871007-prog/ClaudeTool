@@ -15,9 +15,22 @@ const SOURCE_LABEL: Record<SkillSource, string> = {
   recommend: '推荐插件',
 };
 
-function buildInstallCmd(skill: SkillMeta): string | null {
+interface InstallSteps {
+  marketplaceAdd: string;
+  pluginInstall: string;
+}
+
+/**
+ * Build the two-step slash commands to install a recommended plugin
+ * inside a Claude Code session. Each command must be sent separately
+ * (slash commands cannot be chained with `&&`).
+ */
+function buildInstallSteps(skill: SkillMeta): InstallSteps | null {
   if (!skill.marketplaceId) return null;
-  return `claude plugin marketplace add anthropics/skills\nclaude plugin install ${skill.name}@${skill.marketplaceId}`;
+  return {
+    marketplaceAdd: `/plugin marketplace add anthropics/skills`,
+    pluginInstall: `/plugin install ${skill.name}@${skill.marketplaceId}`,
+  };
 }
 
 export function SkillsPanel() {
@@ -170,12 +183,12 @@ function SkillDetail({
   const closePanel = usePanels((s) => s.close);
   const [copied, setCopied] = useState(false);
 
-  const installCmd = buildInstallCmd(skill);
+  const steps = buildInstallSteps(skill);
 
-  const handleCopyInstall = async () => {
-    if (!installCmd) return;
+  const handleCopyAll = async () => {
+    if (!steps) return;
     try {
-      await writeText(installCmd);
+      await writeText(`${steps.marketplaceAdd}\n${steps.pluginInstall}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -183,9 +196,8 @@ function SkillDetail({
     }
   };
 
-  const handleRunInTerminal = () => {
-    if (!installCmd) return;
-    inject(installCmd);
+  const injectStep = (cmd: string) => {
+    inject(cmd);
     closePanel();
   };
 
@@ -219,43 +231,66 @@ function SkillDetail({
         </div>
       )}
 
-      {!skill.installed && installCmd && (
+      {!skill.installed && steps && (
         <div className="rounded border border-border bg-background p-3">
-          <p className="text-xs font-medium">如何安装</p>
-          <code className="mt-2 block whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px]">
-            {installCmd}
-          </code>
-          <div className="mt-2 flex gap-2">
+          <p className="text-xs font-medium">如何安装（在 Claude 会话里分两步执行）</p>
+
+          <div className="mt-2 space-y-1">
+            <p className="text-[11px] text-muted-foreground">第 1 步：注册 marketplace</p>
+            <code className="block whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px]">
+              {steps.marketplaceAdd}
+            </code>
             <button
-              onClick={handleRunInTerminal}
+              onClick={() => injectStep(steps.marketplaceAdd)}
               disabled={!cwd}
-              className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
-              title={cwd ? '把命令写入终端（不自动回车）' : '需要先选个文件夹打开终端'}
+              className="mt-1 flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+              title={cwd ? '写入终端，按回车执行' : '需要先选个文件夹打开终端'}
             >
               <Play className="h-3 w-3" />
-              在终端里试一下
+              在终端里执行第 1 步
             </button>
+          </div>
+
+          <div className="mt-3 space-y-1">
+            <p className="text-[11px] text-muted-foreground">第 2 步：安装 plugin</p>
+            <code className="block whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px]">
+              {steps.pluginInstall}
+            </code>
             <button
-              onClick={handleCopyInstall}
+              onClick={() => injectStep(steps.pluginInstall)}
+              disabled={!cwd}
+              className="mt-1 flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+              title={cwd ? '写入终端，按回车执行' : '需要先选个文件夹打开终端'}
+            >
+              <Play className="h-3 w-3" />
+              在终端里执行第 2 步
+            </button>
+          </div>
+
+          <div className="mt-3 border-t border-border pt-2">
+            <button
+              onClick={handleCopyAll}
               className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] hover:bg-muted"
             >
               {copied ? (
                 <>
                   <Check className="h-3 w-3 text-success" />
-                  已复制
+                  已复制两步命令
                 </>
               ) : (
                 <>
                   <Copy className="h-3 w-3" />
-                  复制
+                  复制两步命令
                 </>
               )}
             </button>
           </div>
+
           <p className="mt-2 text-[11px] text-muted-foreground">
-            提示：在 Windows 上 plugin 命令需要 git-bash。若报错请设环境变量
+            提示：上面是 <code className="font-mono">/plugin</code> 形式的 slash 命令， 可在 Claude
+            会话里直接执行；不要拼成一行。Windows 用户还需先装好 Git for Windows 并设{' '}
             <code className="mx-1 font-mono">CLAUDE_CODE_GIT_BASH_PATH</code>
-            指向你的 bash.exe。
+            指向 bash.exe（M4 起本工具会自动处理）。
           </p>
         </div>
       )}
