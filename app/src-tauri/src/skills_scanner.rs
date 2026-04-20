@@ -14,7 +14,19 @@ pub struct SkillMeta {
     pub path: String,
     pub installed: bool,
     pub category: Option<String>,
-    pub repo_path: Option<String>,
+    /// For recommended plugins: list of skills bundled inside.
+    /// `None` for individually installed skills.
+    pub bundled_skills: Option<Vec<BundledSkillView>>,
+    /// For recommended plugins: marketplace registry id to install from
+    /// (e.g. "anthropic-agent-skills"). Used by frontend to build install cmd.
+    pub marketplace_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundledSkillView {
+    pub name: String,
+    pub description_zh: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,17 +39,39 @@ pub enum SkillSource {
 }
 
 #[derive(Debug, Deserialize)]
-struct SeedSkillEntry {
+struct SeedBundledSkill {
+    name: String,
+    #[serde(rename = "descriptionZh")]
+    description_zh: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeedPluginEntry {
     name: String,
     description: String,
     category: Option<String>,
-    #[serde(rename = "repoPath")]
-    repo_path: Option<String>,
+    #[serde(rename = "bundledSkills")]
+    bundled_skills: Option<Vec<SeedBundledSkill>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SeedFile {
-    skills: Vec<SeedSkillEntry>,
+    #[serde(rename = "marketplaceId")]
+    marketplace_id: String,
+    plugins: Vec<SeedPluginEntry>,
+}
+
+/// Lookup zh-CN description for `(plugin_name, skill_name)`.
+/// Used to translate English SKILL.md frontmatter on installed skills.
+fn lookup_zh_description(plugin_name: &str, skill_name: &str) -> Option<String> {
+    let seed: SeedFile = serde_json::from_str(SEED_SKILLS_JSON).ok()?;
+    seed.plugins
+        .into_iter()
+        .find(|p| p.name == plugin_name)?
+        .bundled_skills?
+        .into_iter()
+        .find(|s| s.name == skill_name)?
+        .description_zh
 }
 
 const SEED_SKILLS_JSON: &str = include_str!("seed/seed-skills.json");
@@ -83,6 +117,13 @@ fn scan_skills_dir(dir: &Path, source: SkillSource, plugin_name: Option<String>)
         let Some((name, description)) = parse_skill_md(&skill_md) else {
             continue;
         };
+
+        // Translate English SKILL.md description to zh-CN if we have it in the seed.
+        let description = plugin_name
+            .as_deref()
+            .and_then(|p| lookup_zh_description(p, &name))
+            .unwrap_or(description);
+
         let id = format!(
             "{}::{}",
             match source {
@@ -102,7 +143,8 @@ fn scan_skills_dir(dir: &Path, source: SkillSource, plugin_name: Option<String>)
             path: skill_md.to_string_lossy().to_string(),
             installed: true,
             category: None,
-            repo_path: None,
+            bundled_skills: None,
+            marketplace_id: None,
         });
     }
     out
@@ -150,26 +192,40 @@ pub fn list_installed_skills(workdir: Option<&Path>) -> Result<Vec<SkillMeta>> {
     Ok(all)
 }
 
+/// Returns recommended *plugins* from the bundled seed file.
+/// Filters out plugins whose name matches an already-installed plugin
+/// (looking at `plugin_name` of installed skills, since installed skills
+/// were extracted from a plugin folder).
 pub fn list_recommended_skills(installed: &[SkillMeta]) -> Vec<SkillMeta> {
     let Ok(seed) = serde_json::from_str::<SeedFile>(SEED_SKILLS_JSON) else {
         return Vec::new();
     };
-    let installed_names: std::collections::HashSet<&str> =
-        installed.iter().map(|s| s.name.as_str()).collect();
+    let installed_plugin_names: std::collections::HashSet<&str> = installed
+        .iter()
+        .filter_map(|s| s.plugin_name.as_deref())
+        .collect();
 
-    seed.skills
+    seed.plugins
         .into_iter()
-        .filter(|s| !installed_names.contains(s.name.as_str()))
-        .map(|s| SkillMeta {
-            id: format!("recommend::{}", s.name),
-            name: s.name.clone(),
-            description: s.description,
+        .filter(|p| !installed_plugin_names.contains(p.name.as_str()))
+        .map(|p| SkillMeta {
+            id: format!("recommend::{}", p.name),
+            name: p.name,
+            description: p.description,
             source: SkillSource::Recommend,
             plugin_name: None,
-            path: s.repo_path.clone().unwrap_or_default(),
+            path: String::new(),
             installed: false,
-            category: s.category,
-            repo_path: s.repo_path,
+            category: p.category,
+            bundled_skills: p.bundled_skills.map(|bs| {
+                bs.into_iter()
+                    .map(|s| BundledSkillView {
+                        name: s.name,
+                        description_zh: s.description_zh.unwrap_or_default(),
+                    })
+                    .collect()
+            }),
+            marketplace_id: Some(seed.marketplace_id.clone()),
         })
         .collect()
 }

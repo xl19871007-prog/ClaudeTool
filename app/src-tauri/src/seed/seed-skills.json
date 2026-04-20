@@ -1,98 +1,48 @@
 {
-  "version": 1,
+  "version": 3,
   "recordedAt": "2026-04-20",
   "source": "https://github.com/anthropics/skills",
-  "note": "Curated subset of Anthropic's official skills repository (ADR-015). Re-sync per release.",
-  "skills": [
+  "marketplaceId": "anthropic-agent-skills",
+  "marketplaceRepo": "anthropics/skills",
+  "note": "Anthropic 官方 marketplace 注册名为 anthropic-agent-skills（≠ GitHub repo 路径 anthropics/skills）。安装单位是 plugin，每个 plugin 内含一个或多个 skill。bundledSkills 中的 descriptionZh 用于本工具展示已装 skill 时把英文 SKILL.md description 翻译为中文。",
+  "plugins": [
     {
-      "name": "pdf",
-      "description": "Generate, edit, and extract content from PDF files",
+      "name": "document-skills",
+      "description": "Office 文档处理全套技能：Excel / Word / PowerPoint / PDF 的读写、转换、分析",
       "category": "document",
-      "repoPath": "document-skills/pdf"
+      "bundledSkills": [
+        { "name": "xlsx", "descriptionZh": "读写 Excel 表格，做汇总与分析" },
+        { "name": "docx", "descriptionZh": "创建和修改 Word 文档" },
+        { "name": "pptx", "descriptionZh": "构建和编辑 PowerPoint 演示文稿" },
+        { "name": "pdf", "descriptionZh": "生成、编辑 PDF，提取其中的文本与表格" }
+      ]
     },
     {
-      "name": "docx",
-      "description": "Create and modify Microsoft Word documents",
-      "category": "document",
-      "repoPath": "document-skills/docx"
+      "name": "example-skills",
+      "description": "12 个示例 skill 大礼包，覆盖设计 / 协作 / 测试 / Web / Skill 开发等多个方向",
+      "category": "examples",
+      "bundledSkills": [
+        { "name": "algorithmic-art", "descriptionZh": "用算法生成艺术图形" },
+        { "name": "brand-guidelines", "descriptionZh": "按品牌规范出设计稿" },
+        { "name": "canvas-design", "descriptionZh": "Canvas 画布视觉设计" },
+        { "name": "doc-coauthoring", "descriptionZh": "多人协作写作辅助" },
+        { "name": "frontend-design", "descriptionZh": "前端界面视觉设计" },
+        { "name": "internal-comms", "descriptionZh": "公司内部沟通文案撰写" },
+        { "name": "mcp-builder", "descriptionZh": "构建 MCP 服务器" },
+        { "name": "skill-creator", "descriptionZh": "创建你自己的 Claude Code skill" },
+        { "name": "slack-gif-creator", "descriptionZh": "为 Slack 制作 GIF 表情" },
+        { "name": "theme-factory", "descriptionZh": "生成主题与配色方案" },
+        { "name": "web-artifacts-builder", "descriptionZh": "构建可在浏览器运行的 Web Artifact" },
+        { "name": "webapp-testing", "descriptionZh": "Web 应用自动化测试" }
+      ]
     },
     {
-      "name": "xlsx",
-      "description": "Read, write, and analyze Excel spreadsheets",
-      "category": "document",
-      "repoPath": "document-skills/xlsx"
-    },
-    {
-      "name": "pptx",
-      "description": "Build and edit PowerPoint presentations",
-      "category": "document",
-      "repoPath": "document-skills/pptx"
-    },
-    {
-      "name": "code-review",
-      "description": "Conduct rigorous code reviews on diffs, files, or whole modules",
+      "name": "claude-api",
+      "description": "Claude API 与 SDK 的文档 skill，辅助构建 LLM 驱动的应用",
       "category": "engineering",
-      "repoPath": "engineering-skills/code-review"
-    },
-    {
-      "name": "git-worktree",
-      "description": "Manage parallel work via git worktrees, including cleanup",
-      "category": "engineering",
-      "repoPath": "engineering-skills/git-worktree"
-    },
-    {
-      "name": "test-writer",
-      "description": "Write comprehensive unit and integration tests for given code",
-      "category": "engineering",
-      "repoPath": "engineering-skills/test-writer"
-    },
-    {
-      "name": "refactor-helper",
-      "description": "Identify smells, suggest refactors, apply them safely with tests",
-      "category": "engineering",
-      "repoPath": "engineering-skills/refactor-helper"
-    },
-    {
-      "name": "security-review",
-      "description": "Audit code changes for OWASP-style vulnerabilities and secrets",
-      "category": "engineering",
-      "repoPath": "engineering-skills/security-review"
-    },
-    {
-      "name": "data-analyst",
-      "description": "Analyze CSV/Parquet datasets, produce summary statistics and charts",
-      "category": "data",
-      "repoPath": "data-skills/data-analyst"
-    },
-    {
-      "name": "sql-builder",
-      "description": "Translate natural-language questions into SQL queries with explanations",
-      "category": "data",
-      "repoPath": "data-skills/sql-builder"
-    },
-    {
-      "name": "api-tester",
-      "description": "Build and run API tests against REST/GraphQL endpoints",
-      "category": "engineering",
-      "repoPath": "engineering-skills/api-tester"
-    },
-    {
-      "name": "release-notes",
-      "description": "Generate release notes from git log, group by feat/fix/chore",
-      "category": "productivity",
-      "repoPath": "productivity-skills/release-notes"
-    },
-    {
-      "name": "meeting-notes",
-      "description": "Summarize meeting transcripts and extract action items",
-      "category": "productivity",
-      "repoPath": "productivity-skills/meeting-notes"
-    },
-    {
-      "name": "find-skills",
-      "description": "Search and discover other Claude skills across registries",
-      "category": "discovery",
-      "repoPath": "discovery-skills/find-skills"
+      "bundledSkills": [
+        { "name": "claude-api", "descriptionZh": "Claude API / Anthropic SDK 用法与最佳实践参考" }
+      ]
     }
   ]
 }

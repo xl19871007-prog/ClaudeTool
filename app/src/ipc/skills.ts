@@ -2,6 +2,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type SkillSource = 'user' | 'project' | 'plugin' | 'recommend';
 
+export interface BundledSkillView {
+  name: string;
+  descriptionZh: string;
+}
+
 export interface SkillMeta {
   id: string;
   name: string;
@@ -11,7 +16,10 @@ export interface SkillMeta {
   path: string;
   installed: boolean;
   category: string | null;
-  repoPath: string | null;
+  /** For recommended plugins: the skills bundled inside. Null for standalone installed skills. */
+  bundledSkills: BundledSkillView[] | null;
+  /** For recommended plugins: marketplace registry id (e.g. "anthropic-agent-skills"). */
+  marketplaceId: string | null;
 }
 
 export interface SkillsReport {

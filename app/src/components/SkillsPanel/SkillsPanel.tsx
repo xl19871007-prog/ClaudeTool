@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react';
-import { Copy, ExternalLink, ChevronLeft } from 'lucide-react';
+import { Copy, ExternalLink, ChevronLeft, Check, Play } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { Drawer } from '@/components/ui/Drawer';
 import { usePanels } from '@/store/panels';
 import { useSkills } from '@/store/skills';
 import { useWorkbench } from '@/store/workbench';
+import { useTerminalInput } from '@/store/terminalInput';
 import type { SkillMeta, SkillSource } from '@/ipc/skills';
 
 const SOURCE_LABEL: Record<SkillSource, string> = {
   user: '用户级',
   project: '项目级',
-  plugin: '插件',
-  recommend: '推荐',
+  plugin: '来自插件',
+  recommend: '推荐插件',
 };
+
+function buildInstallCmd(skill: SkillMeta): string | null {
+  if (!skill.marketplaceId) return null;
+  return `claude plugin marketplace add anthropics/skills\nclaude plugin install ${skill.name}@${skill.marketplaceId}`;
+}
 
 export function SkillsPanel() {
   const open = usePanels((s) => s.open === 'skills');
@@ -73,12 +79,12 @@ export function SkillsPanel() {
           <p className="py-8 text-center text-xs text-muted-foreground">
             本机还没有装任何 Skill
             <br />
-            可在「推荐」Tab 看官方仓库的 Skill 列表
+            可在「推荐」Tab 看官方仓库的 plugin 列表
           </p>
         )}
         {!loading && tab === 'recommend' && recommended.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            推荐列表为空（你已装完所有种子里的 Skill）
+            推荐列表为空（你已装完所有种子里的 plugin）
           </p>
         )}
         {!loading && tab === 'installed' && installed.length > 0 && (
@@ -89,11 +95,16 @@ export function SkillsPanel() {
           </ul>
         )}
         {!loading && tab === 'recommend' && recommended.length > 0 && (
-          <ul className="space-y-2">
-            {recommended.map((s) => (
-              <SkillCard key={s.id} skill={s} onClick={() => void select(s)} />
-            ))}
-          </ul>
+          <>
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              来自 Anthropic 官方 marketplace。每个 plugin 含一个或多个 skill。
+            </p>
+            <ul className="space-y-2">
+              {recommended.map((s) => (
+                <SkillCard key={s.id} skill={s} onClick={() => void select(s)} />
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </Drawer>
@@ -124,6 +135,7 @@ function TabBtn({
 }
 
 function SkillCard({ skill, onClick }: { skill: SkillMeta; onClick: () => void }) {
+  const bundledCount = skill.bundledSkills?.length ?? 0;
   return (
     <li>
       <button
@@ -135,6 +147,7 @@ function SkillCard({ skill, onClick }: { skill: SkillMeta; onClick: () => void }
           <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
             {SOURCE_LABEL[skill.source]}
             {skill.pluginName ? ` · ${skill.pluginName}` : ''}
+            {bundledCount > 0 ? ` · ${bundledCount} 个 skill` : ''}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
@@ -152,14 +165,28 @@ function SkillDetail({
   md: string | null;
   loadingMd: boolean;
 }) {
+  const cwd = useWorkbench((s) => s.cwd);
+  const inject = useTerminalInput((s) => s.inject);
+  const closePanel = usePanels((s) => s.close);
+  const [copied, setCopied] = useState(false);
+
+  const installCmd = buildInstallCmd(skill);
+
   const handleCopyInstall = async () => {
-    if (!skill.repoPath) return;
-    const cmd = `claude plugin marketplace add anthropics/skills && claude plugin install ${skill.name}@anthropics/skills`;
+    if (!installCmd) return;
     try {
-      await writeText(cmd);
+      await writeText(installCmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('clipboard write failed', err);
     }
+  };
+
+  const handleRunInTerminal = () => {
+    if (!installCmd) return;
+    inject(installCmd);
+    closePanel();
   };
 
   return (
@@ -174,20 +201,62 @@ function SkillDetail({
       </div>
       <p className="text-sm">{skill.description}</p>
 
-      {!skill.installed && skill.repoPath && (
+      {skill.bundledSkills && skill.bundledSkills.length > 0 && (
+        <div className="rounded border border-border bg-background p-3">
+          <p className="text-xs font-medium">
+            该 plugin 包含的 skill ({skill.bundledSkills.length})
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {skill.bundledSkills.map((bs) => (
+              <li key={bs.name} className="flex items-start gap-2 text-[11px]">
+                <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                  {bs.name}
+                </code>
+                <span className="text-muted-foreground">{bs.descriptionZh}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!skill.installed && installCmd && (
         <div className="rounded border border-border bg-background p-3">
           <p className="text-xs font-medium">如何安装</p>
           <code className="mt-2 block whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px]">
-            claude plugin marketplace add anthropics/skills{'\n'}claude plugin install {skill.name}
-            @anthropics/skills
+            {installCmd}
           </code>
-          <button
-            onClick={handleCopyInstall}
-            className="mt-2 flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90"
-          >
-            <Copy className="h-3 w-3" />
-            复制安装命令
-          </button>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={handleRunInTerminal}
+              disabled={!cwd}
+              className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+              title={cwd ? '把命令写入终端（不自动回车）' : '需要先选个文件夹打开终端'}
+            >
+              <Play className="h-3 w-3" />
+              在终端里试一下
+            </button>
+            <button
+              onClick={handleCopyInstall}
+              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] hover:bg-muted"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3 w-3 text-success" />
+                  已复制
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3 w-3" />
+                  复制
+                </>
+              )}
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            提示：在 Windows 上 plugin 命令需要 git-bash。若报错请设环境变量
+            <code className="mx-1 font-mono">CLAUDE_CODE_GIT_BASH_PATH</code>
+            指向你的 bash.exe。
+          </p>
         </div>
       )}
 
