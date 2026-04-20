@@ -193,17 +193,28 @@ pub fn check_claude_auth_status() -> AuthStatus {
 }
 
 pub async fn check_network() -> NetworkStatus {
-    let result = net::probe("https://api.anthropic.com").await;
-    if !result.reachable {
-        return NetworkStatus::Unreachable {
-            error: result.error.unwrap_or_default(),
-        };
+    // Two-shot probe: a single failed probe must not declare unreachable,
+    // since users on flaky VPN often see one transient timeout. Retry once
+    // before giving up.
+    let probe_url = "https://api.anthropic.com";
+    let mut last_error: Option<String> = None;
+    for attempt in 0..2 {
+        let result = net::probe(probe_url).await;
+        if result.reachable {
+            let latency = result.latency_ms.unwrap_or(0);
+            return if latency > 1500 {
+                NetworkStatus::Slow { latency_ms: latency }
+            } else {
+                NetworkStatus::Ok { latency_ms: latency }
+            };
+        }
+        last_error = result.error;
+        if attempt == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
     }
-    let latency = result.latency_ms.unwrap_or(0);
-    if latency > 1000 {
-        NetworkStatus::Slow { latency_ms: latency }
-    } else {
-        NetworkStatus::Ok { latency_ms: latency }
+    NetworkStatus::Unreachable {
+        error: last_error.unwrap_or_default(),
     }
 }
 

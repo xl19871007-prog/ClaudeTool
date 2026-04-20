@@ -3,8 +3,10 @@ use serde::Serialize;
 use std::time::{Duration, Instant};
 
 pub fn client() -> Client {
+    // 10s is roomy enough for slow VPN hops without making the user feel
+    // the app is stuck. Per-call retry happens at the env_checker layer.
     Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .user_agent(concat!("ClaudeTool/", env!("CARGO_PKG_VERSION")))
         .build()
         .expect("reqwest client should build")
