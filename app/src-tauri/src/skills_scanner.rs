@@ -76,17 +76,37 @@ struct SeedFile {
     plugins: Vec<SeedPluginEntry>,
 }
 
-/// Lookup zh-CN description for `(plugin_name, skill_name)`.
-/// Used to translate English SKILL.md frontmatter on installed skills.
+/// Lookup zh-CN description for an installed skill by name.
+///
+/// Strategy:
+/// 1. Try `(plugin_name, skill_name)` exact match first (preserves semantic
+///    intent if a plugin owns a specific skill variant).
+/// 2. Fall back to scanning every plugin's bundled list for a skill with
+///    the same name. This is necessary because Claude Code's plugin cache
+///    physically copies the *entire* skills repo into each plugin folder,
+///    so e.g. `document-skills/.../skills/algorithmic-art/` exists even
+///    though algorithmic-art is logically owned by `example-skills`.
 fn lookup_zh_description(plugin_name: &str, skill_name: &str) -> Option<String> {
     let seed: SeedFile = serde_json::from_str(SEED_SKILLS_JSON).ok()?;
+
+    // 1) precise (plugin, skill)
+    if let Some(plugin) = seed.plugins.iter().find(|p| p.name == plugin_name) {
+        if let Some(bundled) = plugin.bundled_skills.as_ref() {
+            if let Some(found) = bundled.iter().find(|s| s.name == skill_name) {
+                if let Some(desc) = found.description_zh.as_deref() {
+                    return Some(desc.to_string());
+                }
+            }
+        }
+    }
+
+    // 2) cross-plugin fallback
     seed.plugins
         .into_iter()
-        .find(|p| p.name == plugin_name)?
-        .bundled_skills?
-        .into_iter()
-        .find(|s| s.name == skill_name)?
-        .description_zh
+        .filter_map(|p| p.bundled_skills)
+        .flat_map(|v| v.into_iter())
+        .find(|s| s.name == skill_name)
+        .and_then(|s| s.description_zh)
 }
 
 const SEED_SKILLS_JSON: &str = include_str!("seed/seed-skills.json");
