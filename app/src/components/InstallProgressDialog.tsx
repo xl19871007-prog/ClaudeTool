@@ -122,7 +122,7 @@ export function InstallProgressDialog({ open, title, onClose }: InstallProgressD
           {done && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
           {failed && <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
           <div className="flex-1">
-            <p className="text-sm">{statusText}</p>
+            <p className="whitespace-pre-line text-sm">{statusText}</p>
             <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
               当前阶段：{stage}
             </p>

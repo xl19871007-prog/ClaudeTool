@@ -247,20 +247,47 @@ pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
                 message: "解析最新 Git for Windows 版本（dry-run）".into(),
             },
         );
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        // Simulate streaming download: 0 → 60MB in 6 ticks of 200ms
+        let total: u64 = 60 * 1024 * 1024;
+        for i in 1..=6 {
+            let downloaded = total * i / 6;
+            emit(
+                &app,
+                InstallEvent::Downloading {
+                    downloaded_bytes: downloaded,
+                    total_bytes: Some(total),
+                    message: format!(
+                        "下载中 {:.1}MB / {:.1}MB（dry-run 模拟）",
+                        downloaded as f64 / 1_048_576.0,
+                        total as f64 / 1_048_576.0
+                    ),
+                },
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
         emit(
             &app,
-            InstallEvent::Downloading {
-                downloaded_bytes: 0,
-                total_bytes: Some(60 * 1024 * 1024),
-                message: "（dry-run 跳过下载）".into(),
+            InstallEvent::Installing {
+                message: "（dry-run 跳过 spawn 安装器）".into(),
             },
         );
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        emit(
+            &app,
+            InstallEvent::Configuring {
+                message: "（dry-run 跳过 setx 环境变量）".into(),
+            },
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         emit(
             &app,
             InstallEvent::Done {
-                message: "Dry-run 完成。实际运行时会下载、安装、配置环境变量。".into(),
+                message: "Dry-run 完成 ✓ — 实际运行时会下载/spawn UAC/setx。\n\
+                          ⚠️ 想让 ReadinessWizard 消失请到「设置」关闭「模拟未安装 Git」开关。"
+                    .into(),
             },
         );
         return Ok(());
@@ -412,15 +439,51 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
         );
         emit(
             &app,
+            InstallEvent::Resolving {
+                message: "准备执行官方 PowerShell 脚本（dry-run）...".into(),
+            },
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        // Simulate streaming download via the PowerShell script: 0 → 80MB
+        let total: u64 = 80 * 1024 * 1024;
+        for i in 1..=6 {
+            let downloaded = total * i / 6;
+            emit(
+                &app,
+                InstallEvent::Downloading {
+                    downloaded_bytes: downloaded,
+                    total_bytes: Some(total),
+                    message: format!(
+                        "下载中 {:.1}MB / {:.1}MB（dry-run 模拟）",
+                        downloaded as f64 / 1_048_576.0,
+                        total as f64 / 1_048_576.0
+                    ),
+                },
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        emit(
+            &app,
             InstallEvent::Installing {
                 message: "（dry-run 跳过 PowerShell 调用）".into(),
             },
         );
-        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        emit(
+            &app,
+            InstallEvent::Verifying {
+                message: "（dry-run 跳过 claude --version 验证）".into(),
+            },
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         emit(
             &app,
             InstallEvent::Done {
-                message: "Dry-run 完成。实际运行会调 irm https://claude.ai/install.ps1 | iex。".into(),
+                message: "Dry-run 完成 ✓ — 实际运行会调 `irm https://claude.ai/install.ps1 | iex`。\n\
+                          ⚠️ 想让 ReadinessWizard 消失请到「设置」关闭「模拟未安装 Claude Code」开关。"
+                    .into(),
             },
         );
         return Ok(());
