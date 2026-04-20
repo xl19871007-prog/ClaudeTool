@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, ExternalLink, ChevronLeft, Check, Play, Search } from 'lucide-react';
+import { Copy, ExternalLink, ChevronLeft, Check, Play, Search, Download } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { Drawer } from '@/components/ui/Drawer';
 import { usePanels } from '@/store/panels';
 import { useSkills } from '@/store/skills';
@@ -345,13 +347,14 @@ function SkillDetail({
 
       {skill.installed && (
         <div className="rounded border border-border bg-background p-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-medium">SKILL.md</p>
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <ExternalLink className="h-3 w-3" />
-              <span className="font-mono">{skill.path}</span>
-            </span>
+            <DownloadButton skill={skill} md={md} />
           </div>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground" title={skill.path}>
+            <ExternalLink className="mr-1 inline h-3 w-3" />
+            <span className="font-mono">{skill.path}</span>
+          </p>
           {loadingMd ? (
             <p className="mt-2 text-xs text-muted-foreground">读取中...</p>
           ) : md ? (
@@ -364,5 +367,54 @@ function SkillDetail({
         </div>
       )}
     </div>
+  );
+}
+
+function DownloadButton({ skill, md }: { skill: SkillMeta; md: string | null }) {
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const recentlySaved = savedAt !== null && Date.now() - savedAt < 2000;
+
+  const handleDownload = async () => {
+    if (!md || saving) return;
+    setSaving(true);
+    try {
+      const target = await saveDialog({
+        title: `保存 ${skill.name} 的 SKILL.md`,
+        defaultPath: `${skill.name}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (target) {
+        await writeTextFile(target, md);
+        setSavedAt(Date.now());
+        setTimeout(() => setSavedAt(null), 2000);
+      }
+    } catch (err) {
+      console.error('save SKILL.md failed', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleDownload}
+      disabled={!md || saving}
+      className="flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+      title={md ? '保存 SKILL.md 到本地' : 'SKILL.md 内容尚未加载'}
+    >
+      {recentlySaved ? (
+        <>
+          <Check className="h-3 w-3" />
+          已保存
+        </>
+      ) : (
+        <>
+          <Download className="h-3 w-3" />
+          {saving ? '保存中...' : '下载'}
+        </>
+      )}
+    </button>
   );
 }
