@@ -25,6 +25,7 @@ pub fn run() {
             commands::set_suppress_login_prompt,
             commands::set_last_seen_version,
             commands::set_debug_flag,
+            commands::set_proxy,
             commands::list_sessions,
             commands::list_skills,
             commands::read_skill_md,

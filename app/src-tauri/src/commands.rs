@@ -1,4 +1,4 @@
-use crate::config::{self, AppConfig};
+use crate::config::{self, AppConfig, ProxyConfig};
 use crate::env_checker::{
     self, AuthStatus, ClaudeStatus, GitBashEnvStatus, GitStatus, NetworkStatus, UpdateInfo,
 };
@@ -75,6 +75,14 @@ pub fn set_last_seen_version(value: String) -> Result<()> {
     let mut cfg = config::load();
     cfg.last_seen_version = Some(value);
     config::save(&cfg)
+}
+
+#[tauri::command]
+pub fn set_proxy(proxy: ProxyConfig) -> Result<AppConfig> {
+    let mut cfg = config::load();
+    cfg.proxy = proxy;
+    config::save(&cfg)?;
+    Ok(cfg)
 }
 
 #[tauri::command]

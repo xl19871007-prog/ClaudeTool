@@ -154,13 +154,21 @@ async fn download_to_temp(
 
 /// Spawn a process and pipe its stdout/stderr lines as Log events.
 /// Returns the exit code (or -1 if the child couldn't be killed cleanly).
+/// User-configured proxy is injected as HTTP_PROXY/HTTPS_PROXY env vars
+/// (ADR-018) so spawned tools (PowerShell, git installer) can reach the
+/// internet on systems where the VPN is sysproxy-only.
 async fn spawn_streaming(
     app: &AppHandle,
     program: &str,
     args: &[&str],
 ) -> Result<i32> {
-    let mut child = AsyncCommand::new(program)
-        .args(args)
+    let cfg = config::load();
+    let mut cmd = AsyncCommand::new(program);
+    cmd.args(args);
+    for (k, v) in cfg.proxy.as_env_pairs() {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

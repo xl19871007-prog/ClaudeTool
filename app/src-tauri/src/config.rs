@@ -3,6 +3,18 @@ use crate::fs as appfs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProxyConfig {
+    /// HTTP proxy URL (e.g. "http://127.0.0.1:7897"). Injected as HTTP_PROXY
+    /// env var to spawned child processes (claude / git installer / powershell)
+    /// and as reqwest proxy on the in-process HTTP client.
+    pub http: Option<String>,
+    pub https: Option<String>,
+    /// Comma-separated host list to bypass proxy (NO_PROXY env var).
+    pub no_proxy: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppConfig {
@@ -11,6 +23,11 @@ pub struct AppConfig {
     pub theme: String,
     pub suppress_login_prompt: bool,
     pub last_seen_version: Option<String>,
+    /// User-supplied proxy URLs forwarded to Claude / Git / install scripts.
+    /// See ADR-018 (revising ADR-013): OS-level VPNs in sysproxy mode do
+    /// NOT cover Node/CLI children; only TUN-mode VPNs do. So we offer
+    /// explicit proxy injection for users on the common sysproxy setup.
+    pub proxy: ProxyConfig,
     /// Debug-only: pretend Claude Code is not installed (forces ReadinessWizard).
     pub debug_force_claude_missing: bool,
     /// Debug-only: pretend Git for Windows is not installed.
@@ -27,10 +44,41 @@ impl Default for AppConfig {
             theme: "system".into(),
             suppress_login_prompt: false,
             last_seen_version: None,
+            proxy: ProxyConfig::default(),
             debug_force_claude_missing: false,
             debug_force_git_missing: false,
             debug_dry_run: false,
         }
+    }
+}
+
+impl ProxyConfig {
+    /// Yields (key, value) env-var pairs ready to set on a child process.
+    /// Empty / None entries are skipped. Both upper and lower case are set
+    /// because different tools read different conventions (Node reads
+    /// upper, curl/Linux tools often read lower).
+    pub fn as_env_pairs(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if let Some(v) = self.http.as_ref().filter(|s| !s.is_empty()) {
+            out.push(("HTTP_PROXY".into(), v.clone()));
+            out.push(("http_proxy".into(), v.clone()));
+        }
+        if let Some(v) = self.https.as_ref().filter(|s| !s.is_empty()) {
+            out.push(("HTTPS_PROXY".into(), v.clone()));
+            out.push(("https_proxy".into(), v.clone()));
+        }
+        if let Some(v) = self.no_proxy.as_ref().filter(|s| !s.is_empty()) {
+            out.push(("NO_PROXY".into(), v.clone()));
+            out.push(("no_proxy".into(), v.clone()));
+        }
+        out
+    }
+
+    /// Convenience predicate for callers; intentionally kept for future use.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.http.as_ref().is_none_or(|s| s.is_empty())
+            && self.https.as_ref().is_none_or(|s| s.is_empty())
     }
 }
 

@@ -1,15 +1,30 @@
+use crate::config;
 use reqwest::Client;
 use serde::Serialize;
 use std::time::{Duration, Instant};
 
 pub fn client() -> Client {
+    let cfg = config::load();
     // 10s is roomy enough for slow VPN hops without making the user feel
     // the app is stuck. Per-call retry happens at the env_checker layer.
-    Client::builder()
+    let mut builder = Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent(concat!("ClaudeTool/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .expect("reqwest client should build")
+        .user_agent(concat!("ClaudeTool/", env!("CARGO_PKG_VERSION")));
+
+    // ADR-018: honor user-configured proxy for in-process HTTP (network probe,
+    // GitHub Releases API, Git installer download).
+    if let Some(url) = cfg.proxy.https.as_ref().filter(|s| !s.is_empty()) {
+        if let Ok(p) = reqwest::Proxy::https(url) {
+            builder = builder.proxy(p);
+        }
+    }
+    if let Some(url) = cfg.proxy.http.as_ref().filter(|s| !s.is_empty()) {
+        if let Ok(p) = reqwest::Proxy::http(url) {
+            builder = builder.proxy(p);
+        }
+    }
+
+    builder.build().expect("reqwest client should build")
 }
 
 #[derive(Debug, Clone, Serialize)]

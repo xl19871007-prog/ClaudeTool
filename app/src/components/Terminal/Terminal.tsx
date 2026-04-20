@@ -5,6 +5,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { spawn, type IPty } from 'tauri-pty';
 import '@xterm/xterm/css/xterm.css';
 import { useTerminalInput } from '@/store/terminalInput';
+import { useEnv } from '@/store/env';
+import { proxyToEnv } from '@/ipc/env';
 import { t } from '@/i18n/zh-CN';
 
 interface TerminalProps {
@@ -23,6 +25,7 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
 
   const pendingInput = useTerminalInput((s) => s.pending);
   const consumeInput = useTerminalInput((s) => s.consume);
+  const proxy = useEnv((s) => s.config?.proxy ?? null);
 
   useEffect(() => {
     setExitInfo(null);
@@ -54,10 +57,14 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
     let disposed = false;
 
     try {
+      // ADR-018: inject user-configured proxy env vars so Claude CLI can
+      // reach Anthropic on systems where the OS VPN is sysproxy-only.
+      const proxyEnv = proxyToEnv(proxy);
       pty = spawn('claude', args, {
         cwd,
         cols: term.cols,
         rows: term.rows,
+        env: Object.keys(proxyEnv).length > 0 ? proxyEnv : undefined,
       });
       ptyRef.current = pty;
 
@@ -108,6 +115,10 @@ export function Terminal({ cwd, args, epoch }: TerminalProps) {
       termRef.current = null;
       term.dispose();
     };
+    // proxy intentionally excluded from deps: changing it should not auto-restart
+    // an active claude session; user can hit "重启" or change folder if they want
+    // the new proxy to take effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, args, epoch, restartKey]);
 
   // Consume injected input (from CommandPanel "试一试").
