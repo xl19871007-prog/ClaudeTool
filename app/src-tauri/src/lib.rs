@@ -7,6 +7,7 @@ mod env_checker;
 mod error;
 mod fs;
 mod history_parser;
+mod installer;
 mod net;
 mod skills_scanner;
 
@@ -23,9 +24,12 @@ pub fn run() {
             commands::get_config,
             commands::set_suppress_login_prompt,
             commands::set_last_seen_version,
+            commands::set_debug_flag,
             commands::list_sessions,
             commands::list_skills,
             commands::read_skill_md,
+            commands::install_git,
+            commands::install_claude_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

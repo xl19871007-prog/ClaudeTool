@@ -20,11 +20,22 @@ export interface UpdateInfo {
   hasUpdate: boolean;
 }
 
+export type GitStatus =
+  | { kind: 'installed'; version: string; path: string; bashPath: string | null }
+  | { kind: 'notInstalled' };
+
+export type GitBashEnvStatus =
+  | { kind: 'configured'; path: string }
+  | { kind: 'notConfigured' }
+  | { kind: 'invalidPath'; path: string };
+
 export interface EnvironmentReport {
   claude: ClaudeStatus;
   auth: AuthStatus;
   network: NetworkStatus;
   update: UpdateInfo;
+  git: GitStatus;
+  gitBashEnv: GitBashEnvStatus;
 }
 
 export interface AppConfig {
@@ -33,7 +44,15 @@ export interface AppConfig {
   theme: string;
   suppressLoginPrompt: boolean;
   lastSeenVersion: string | null;
+  debugForceClaudeMissing: boolean;
+  debugForceGitMissing: boolean;
+  debugDryRun: boolean;
 }
+
+export const setDebugFlag = (
+  name: 'forceClaudeMissing' | 'forceGitMissing' | 'dryRun',
+  value: boolean
+) => invoke<AppConfig>('set_debug_flag', { name, value });
 
 export const checkEnvironment = () => invoke<EnvironmentReport>('check_environment');
 

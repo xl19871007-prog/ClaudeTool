@@ -11,6 +11,12 @@ pub struct AppConfig {
     pub theme: String,
     pub suppress_login_prompt: bool,
     pub last_seen_version: Option<String>,
+    /// Debug-only: pretend Claude Code is not installed (forces ReadinessWizard).
+    pub debug_force_claude_missing: bool,
+    /// Debug-only: pretend Git for Windows is not installed.
+    pub debug_force_git_missing: bool,
+    /// Debug-only: install commands stop before spawning real installers.
+    pub debug_dry_run: bool,
 }
 
 impl Default for AppConfig {
@@ -21,6 +27,9 @@ impl Default for AppConfig {
             theme: "system".into(),
             suppress_login_prompt: false,
             last_seen_version: None,
+            debug_force_claude_missing: false,
+            debug_force_git_missing: false,
+            debug_dry_run: false,
         }
     }
 }

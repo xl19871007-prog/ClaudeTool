@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Folder, BookOpen, Package, Settings } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { useWorkbench, pathBasename } from '@/store/workbench';
 import { useEnv } from '@/store/env';
 import { usePanels } from '@/store/panels';
@@ -12,6 +14,7 @@ export function TopBar() {
   const report = useEnv((s) => s.report);
   const togglePanel = usePanels((s) => s.toggle);
   const activePanel = usePanels((s) => s.open);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleSelectFolder = async () => {
     try {
@@ -115,6 +118,7 @@ export function TopBar() {
           <span>{t.topbar.skills}</span>
         </button>
         <button
+          onClick={() => setSettingsOpen(true)}
           className="relative rounded p-2 hover:bg-muted"
           aria-label={
             hasUpdate ? `${t.topbar.settings} · ${t.topbar.updateAvailable}` : t.topbar.settings
@@ -127,6 +131,8 @@ export function TopBar() {
           )}
         </button>
       </div>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   );
 }

@@ -13,6 +13,28 @@ pub enum ClaudeStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GitStatus {
+    #[serde(rename_all = "camelCase")]
+    Installed {
+        version: String,
+        path: String,
+        bash_path: Option<String>,
+    },
+    NotInstalled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GitBashEnvStatus {
+    #[serde(rename_all = "camelCase")]
+    Configured { path: String },
+    NotConfigured,
+    #[serde(rename_all = "camelCase")]
+    InvalidPath { path: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum AuthStatus {
     #[serde(rename_all = "camelCase")]
     LoggedIn { account: Option<String> },
@@ -47,6 +69,83 @@ pub fn check_claude_installed() -> ClaudeStatus {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "claude".into());
     ClaudeStatus::Installed { version, path }
+}
+
+pub fn check_git_installed() -> GitStatus {
+    let Some(version) = run_git_version() else {
+        return GitStatus::NotInstalled;
+    };
+    let path = find_git_path()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "git".into());
+    let bash_path = find_git_bash_path();
+    GitStatus::Installed {
+        version,
+        path,
+        bash_path: bash_path.map(|p| p.to_string_lossy().to_string()),
+    }
+}
+
+fn run_git_version() -> Option<String> {
+    let output = Command::new("git").arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn find_git_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let cmd = "where";
+    #[cfg(not(target_os = "windows"))]
+    let cmd = "which";
+
+    let output = Command::new(cmd).arg("git").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(|l| PathBuf::from(l.trim()))
+}
+
+/// On Windows, find git-bash.exe by inspecting the git install directory.
+/// `git.exe` is typically at `<install>/cmd/git.exe`; bash is at `<install>/bin/bash.exe`.
+#[cfg(target_os = "windows")]
+fn find_git_bash_path() -> Option<PathBuf> {
+    let git_path = find_git_path()?;
+    // git.exe is in <install>/cmd/ or <install>/mingw64/bin/
+    let mut dir = git_path.parent()?.to_path_buf();
+    // Walk up to find install root (the dir containing both `cmd/` and `bin/`).
+    for _ in 0..3 {
+        let bash = dir.join("bin").join("bash.exe");
+        if bash.exists() {
+            return Some(bash);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_git_bash_path() -> Option<PathBuf> {
+    None
+}
+
+pub fn check_git_bash_env() -> GitBashEnvStatus {
+    match std::env::var("CLAUDE_CODE_GIT_BASH_PATH") {
+        Ok(path) if !path.is_empty() => {
+            if std::path::Path::new(&path).exists() {
+                GitBashEnvStatus::Configured { path }
+            } else {
+                GitBashEnvStatus::InvalidPath { path }
+            }
+        }
+        _ => GitBashEnvStatus::NotConfigured,
+    }
 }
 
 fn run_claude_version() -> Option<String> {
