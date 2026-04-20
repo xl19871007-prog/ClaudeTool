@@ -150,30 +150,63 @@ fn scan_skills_dir(dir: &Path, source: SkillSource, plugin_name: Option<String>)
     out
 }
 
+/// Schema of `~/.claude/plugins/installed_plugins.json` (Claude Code's manifest).
+#[derive(Debug, Deserialize)]
+struct InstalledPluginsManifest {
+    plugins: std::collections::HashMap<String, Vec<InstalledPluginEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstalledPluginEntry {
+    #[serde(rename = "installPath")]
+    install_path: String,
+}
+
+/// Read `installed_plugins.json` and yield `(plugin_name_only, install_path)`.
+/// `plugin_name_only` strips the `@<marketplace>` suffix.
+fn read_installed_plugins() -> Vec<(String, std::path::PathBuf)> {
+    let Some(home) = appfs::claude_home() else {
+        return Vec::new();
+    };
+    let manifest_path = home.join("plugins").join("installed_plugins.json");
+    let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+        return Vec::new();
+    };
+    let Ok(manifest) = serde_json::from_str::<InstalledPluginsManifest>(&content) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for (full_id, entries) in manifest.plugins {
+        let plugin_name = full_id.split('@').next().unwrap_or(&full_id).to_string();
+        if let Some(entry) = entries.into_iter().next() {
+            out.push((plugin_name, std::path::PathBuf::from(entry.install_path)));
+        }
+    }
+    out
+}
+
 pub fn list_installed_skills(workdir: Option<&Path>) -> Result<Vec<SkillMeta>> {
     let mut all = Vec::new();
 
     if let Some(home) = appfs::claude_home() {
+        // User-level standalone skills (no plugin)
         let user_skills = home.join("skills");
         if user_skills.is_dir() {
             all.extend(scan_skills_dir(&user_skills, SkillSource::User, None));
         }
 
-        let plugins_dir = home.join("plugins");
-        if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
-            for entry in entries.flatten() {
-                let plugin_path = entry.path();
-                if !plugin_path.is_dir() {
-                    continue;
-                }
-                let plugin_name = plugin_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .map(String::from);
-                let inner = plugin_path.join("skills");
-                if inner.is_dir() {
-                    all.extend(scan_skills_dir(&inner, SkillSource::Plugin, plugin_name));
-                }
+        // Plugin-bundled skills: read manifest for authoritative install paths.
+        // Avoids guessing the plugin layout (which is actually
+        // ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/).
+        for (plugin_name, install_path) in read_installed_plugins() {
+            let skills_dir = install_path.join("skills");
+            if skills_dir.is_dir() {
+                all.extend(scan_skills_dir(
+                    &skills_dir,
+                    SkillSource::Plugin,
+                    Some(plugin_name),
+                ));
             }
         }
     }
