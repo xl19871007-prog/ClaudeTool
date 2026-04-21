@@ -565,8 +565,132 @@ pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
     }
 }
 
-/// Install Claude Code via the official PowerShell installer.
-/// `irm https://claude.ai/install.ps1 | iex`
+// =============================================================================
+// Claude Code direct-download install (replaces `irm install.ps1 | iex`)
+//
+// Why we don't use Anthropic's PowerShell installer:
+//   1. `claude.ai/install.ps1` is fronted by Cloudflare. On some user IPs CF
+//      returns a JS-challenge HTML page; PowerShell's `irm` can't solve JS,
+//      so the script-as-text becomes garbage and execution explodes.
+//   2. The installer prints "Installation complete!" even when the second-stage
+//      binary download fails ("× Installation failed"). PowerShell's exit code
+//      is 0, so we (the parent) can't detect failure from the process state.
+//   3. The installer sometimes forgets to add ~/.local/bin to user PATH and
+//      delegates that to the human ("‼ Setup notes: ...").
+//
+// What we do instead: hit the same downloads.claude.ai endpoints that
+// install.ps1 itself uses, but from Rust, with our 5-retry/proxy/progress
+// pipeline plus SHA256 verification. downloads.claude.ai is served from
+// Google Cloud Storage (`x-goog-*` response headers) with no Cloudflare
+// challenge.
+//
+//   GET https://downloads.claude.ai/claude-code-releases/latest
+//     → "<version>" (e.g. "2.1.116")
+//   GET https://downloads.claude.ai/claude-code-releases/<v>/manifest.json
+//     → JSON with platforms.win32-x64 = { binary, checksum (sha256), size }
+//   GET https://downloads.claude.ai/claude-code-releases/<v>/win32-x64/claude.exe
+//     → raw binary, ~247 MB
+// =============================================================================
+
+const CLAUDE_DOWNLOAD_BASE: &str = "https://downloads.claude.ai/claude-code-releases";
+
+#[derive(Debug, Deserialize)]
+struct ClaudeManifest {
+    platforms: std::collections::HashMap<String, ClaudePlatformEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ClaudePlatformEntry {
+    binary: String,
+    checksum: String,
+    size: u64,
+}
+
+async fn fetch_latest_claude_version() -> Result<String> {
+    let url = format!("{CLAUDE_DOWNLOAD_BASE}/latest");
+    let v = net::client()
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?
+        .trim()
+        .to_string();
+    if v.is_empty() {
+        return Err(AppError::Config(
+            "Anthropic latest 端点返回空版本字符串".into(),
+        ));
+    }
+    Ok(v)
+}
+
+async fn fetch_claude_win32_entry(version: &str) -> Result<ClaudePlatformEntry> {
+    let url = format!("{CLAUDE_DOWNLOAD_BASE}/{version}/manifest.json");
+    let manifest: ClaudeManifest = net::client()
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    manifest
+        .platforms
+        .get("win32-x64")
+        .cloned()
+        .ok_or_else(|| {
+            AppError::Config(format!(
+                "manifest 里没有 win32-x64 条目（version={version}）"
+            ))
+        })
+}
+
+/// Verify a downloaded file's SHA256 matches the manifest's checksum.
+/// Reads the file in 1MB chunks so we don't blow memory on the 250MB binary.
+async fn verify_sha256(path: &std::path::Path, expected_hex: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let actual_hex = format!("{:x}", hasher.finalize());
+    if actual_hex.eq_ignore_ascii_case(expected_hex) {
+        Ok(())
+    } else {
+        Err(AppError::Config(format!(
+            "SHA256 不匹配（下载可能损坏或被篡改）。\n  期望: {expected_hex}\n  实际: {actual_hex}"
+        )))
+    }
+}
+
+/// Move the freshly-downloaded binary into %USERPROFILE%\.local\bin\<binary>.
+/// Creates the directory if it doesn't exist. Overwrites any existing file.
+async fn install_binary_to_local_bin(temp_path: &std::path::Path, binary_name: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| AppError::Config("could not resolve user home dir".into()))?;
+    let bin_dir = home.join(".local").join("bin");
+    tokio::fs::create_dir_all(&bin_dir).await?;
+    let dest = bin_dir.join(binary_name);
+    // Best-effort remove old file first; rename will fail across drives if a
+    // stale file is open by the current process.
+    let _ = tokio::fs::remove_file(&dest).await;
+    // Cross-volume safe: copy + remove, not rename.
+    tokio::fs::copy(temp_path, &dest).await?;
+    let _ = tokio::fs::remove_file(temp_path).await;
+    Ok(dest)
+}
+
+/// Install Claude Code by directly downloading the official binary from
+/// downloads.claude.ai (the same endpoints Anthropic's install.ps1 uses,
+/// but without the lying-on-success and CF-blocked PowerShell wrapper).
 pub async fn install_claude_code(app: AppHandle) -> Result<()> {
     let cfg = config::load();
 
@@ -581,19 +705,19 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
         emit(
             &app,
             InstallEvent::Log {
-                line: "[DRY-RUN] skipping real PowerShell install".into(),
+                line: "[DRY-RUN] skipping real download from downloads.claude.ai".into(),
             },
         );
         emit(
             &app,
             InstallEvent::Resolving {
-                message: "准备执行官方 PowerShell 脚本（dry-run）...".into(),
+                message: "解析最新版本号（dry-run）...".into(),
             },
         );
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-        // Simulate streaming download via the PowerShell script: 0 → 80MB
-        let total: u64 = 80 * 1024 * 1024;
+        // Simulate streaming download of the ~250MB Win binary
+        let total: u64 = 247 * 1024 * 1024;
         for i in 1..=6 {
             let downloaded = total * i / 6;
             emit(
@@ -602,7 +726,7 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
                     downloaded_bytes: downloaded,
                     total_bytes: Some(total),
                     message: format!(
-                        "下载中 {:.1}MB / {:.1}MB（dry-run 模拟）",
+                        "下载 claude.exe {:.1}MB / {:.1}MB（dry-run 模拟）",
                         downloaded as f64 / 1_048_576.0,
                         total as f64 / 1_048_576.0
                     ),
@@ -613,22 +737,15 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
 
         emit(
             &app,
-            InstallEvent::Installing {
-                message: "（dry-run 跳过 PowerShell 调用）".into(),
-            },
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        emit(
-            &app,
             InstallEvent::Verifying {
-                message: "（dry-run 跳过 claude --version 验证）".into(),
+                message: "（dry-run 跳过 SHA256 校验和最终验证）".into(),
             },
         );
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         emit(
             &app,
             InstallEvent::Done {
-                message: "Dry-run 完成 ✓ — 实际运行会调 `irm https://claude.ai/install.ps1 | iex`。\n\
+                message: "Dry-run 完成 ✓ — 实际运行会从 downloads.claude.ai 直拉二进制（绕过 CF + 不依赖 PS 脚本）。\n\
                           ⚠️ 想让 ReadinessWizard 消失请到「设置」关闭「模拟未安装 Claude Code」开关。"
                     .into(),
             },
@@ -636,42 +753,160 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
         return Ok(());
     }
 
+    // Step 1: resolve latest version
     emit(
         &app,
-        InstallEvent::Installing {
-            message: "执行官方 PowerShell 安装脚本（约 80MB 下载，可能需 1–3 分钟）...".into(),
+        InstallEvent::Resolving {
+            message: "查询最新 Claude Code 版本（downloads.claude.ai）...".into(),
+        },
+    );
+    let version = match fetch_latest_claude_version().await {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = classify_download_error(&e, "拉取最新版本号");
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "resolve".into(),
+                    message: msg.clone(),
+                    recoverable: true,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+    emit(
+        &app,
+        InstallEvent::Log {
+            line: format!("[resolve] latest version = {version}"),
         },
     );
 
-    let code = spawn_streaming(
+    // Step 2: fetch manifest and locate win32-x64 entry
+    let entry = match fetch_claude_win32_entry(&version).await {
+        Ok(e) => e,
+        Err(e) => {
+            let msg = classify_download_error(&e, "拉取 manifest.json");
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "manifest".into(),
+                    message: msg.clone(),
+                    recoverable: true,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+    emit(
         &app,
-        "powershell.exe",
-        &[
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "irm https://claude.ai/install.ps1 | iex",
-        ],
-    )
-    .await?;
+        InstallEvent::Log {
+            line: format!(
+                "[manifest] win32-x64: binary={}, size={:.1}MB, sha256={}…",
+                entry.binary,
+                entry.size as f64 / 1_048_576.0,
+                truncate(&entry.checksum, 16)
+            ),
+        },
+    );
 
-    if code != 0 {
-        let msg = format!("PowerShell 脚本退出码 {code}");
+    // Step 3: stream-download claude.exe (5-retry pipeline already handles
+    // proxy / chunk drops / CDN flakes).
+    let download_url = format!("{CLAUDE_DOWNLOAD_BASE}/{version}/win32-x64/{}", entry.binary);
+    emit(
+        &app,
+        InstallEvent::Downloading {
+            downloaded_bytes: 0,
+            total_bytes: Some(entry.size),
+            message: format!("准备下载 claude.exe（{:.0}MB）...", entry.size as f64 / 1_048_576.0),
+        },
+    );
+    let temp_path = match download_to_temp(
+        &app,
+        &download_url,
+        Some(entry.size),
+        "claude-code-installer.exe",
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            let msg = classify_download_error(&e, "下载 claude.exe");
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "download".into(),
+                    message: msg.clone(),
+                    recoverable: true,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+
+    // Step 4: SHA256 verify (Anthropic's own script doesn't do this; we do)
+    emit(
+        &app,
+        InstallEvent::Verifying {
+            message: "校验 SHA256（防止下载被代理/CDN 篡改或截断）...".into(),
+        },
+    );
+    if let Err(e) = verify_sha256(&temp_path, &entry.checksum).await {
+        let msg = format!(
+            "校验失败：{e}\n\n建议：换 VPN 节点重试（多半是中间代理压缩或截断了响应）。"
+        );
         emit(
             &app,
             InstallEvent::Failed {
-                stage_id: "powershell".into(),
+                stage_id: "checksum".into(),
                 message: msg.clone(),
                 recoverable: true,
             },
         );
+        // Clean up the bad file so a retry doesn't reuse it.
+        let _ = tokio::fs::remove_file(&temp_path).await;
         return Err(AppError::Config(msg));
     }
+    emit(
+        &app,
+        InstallEvent::Log {
+            line: "[verify] SHA256 ✓".into(),
+        },
+    );
 
-    // Anthropic's install script sometimes leaves ~/.local/bin out of user PATH
-    // and prints a manual-setup note. Proactively ensure it's registered so the
-    // next ClaudeTool launch (or any new shell) can find `claude.exe`.
+    // Step 5: move into ~/.local/bin/claude.exe
+    emit(
+        &app,
+        InstallEvent::Installing {
+            message: "安装到 %USERPROFILE%\\.local\\bin\\claude.exe ...".into(),
+        },
+    );
+    let installed_path = match install_binary_to_local_bin(&temp_path, &entry.binary).await {
+        Ok(p) => p,
+        Err(e) => {
+            let msg = format!(
+                "无法写入 ~/.local/bin/{}：{e}\n\n常见原因：杀毒软件拦截写入；或目录被占用（请先关掉所有 claude 终端）。",
+                entry.binary
+            );
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "install".into(),
+                    message: msg.clone(),
+                    recoverable: true,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+    emit(
+        &app,
+        InstallEvent::Log {
+            line: format!("[install] wrote {}", installed_path.display()),
+        },
+    );
+
+    // Step 6: ensure ~/.local/bin is in user PATH (idempotent)
     if let Err(e) = ensure_local_bin_in_path(&app).await {
         emit(
             &app,
@@ -681,42 +916,82 @@ pub async fn install_claude_code(app: AppHandle) -> Result<()> {
         );
     }
 
+    // Step 7: real verification (file presence + best-effort version probe)
     emit(
         &app,
         InstallEvent::Verifying {
-            message: "验证 Claude Code 安装...".into(),
+            message: "验证安装结果...".into(),
         },
     );
+    if !installed_path.exists() {
+        // This shouldn't happen — we just wrote it — but defend anyway.
+        let msg = format!("安装文件意外消失：{}", installed_path.display());
+        emit(
+            &app,
+            InstallEvent::Failed {
+                stage_id: "verify".into(),
+                message: msg.clone(),
+                recoverable: false,
+            },
+        );
+        return Err(AppError::Config(msg));
+    }
     match crate::env_checker::check_claude_installed() {
-        crate::env_checker::ClaudeStatus::Installed { version, .. } => {
+        crate::env_checker::ClaudeStatus::Installed { version: v, .. } => {
             emit(
                 &app,
                 InstallEvent::Done {
-                    message: format!("✓ Claude Code 已安装：{version}（PATH 在新终端中生效）。"),
+                    message: format!(
+                        "✓ Claude Code 已安装并验证：{v}\n\n安装位置：{}\n（在新终端中可直接 `claude`）",
+                        installed_path.display()
+                    ),
                 },
             );
             Ok(())
         }
         crate::env_checker::ClaudeStatus::NotInstalled => {
-            // PowerShell exit 0 means the install script completed. In this
-            // branch our in-process PATH check still can't find claude.exe —
-            // this is expected because:
-            //   1. We just wrote ~/.local/bin to HKCU\Environment via
-            //      ensure_local_bin_in_path, but the current process holds a
-            //      PATH snapshot from launch time.
-            //   2. A ClaudeTool restart will re-read user PATH and pick it up.
-            // So: treat as success with an explicit restart hint.
+            // File exists, PATH was added, but our current process holds a
+            // pre-launch PATH snapshot — restart will pick it up.
             emit(
                 &app,
                 InstallEvent::Done {
-                    message: "✓ Claude Code 已安装，~/.local/bin 已加入 user PATH。\n\n\
-                              ⚠️ ClaudeTool 当前进程持有旧的 PATH 快照，需要\n\
-                              **完全退出 ClaudeTool 再重新启动**才能识别 claude 命令。\n\n\
-                              关闭本对话框 → 右上角关闭 ClaudeTool → 重新打开。"
-                        .into(),
+                    message: format!(
+                        "✓ Claude Code 已下载并安装：版本 {version}\n安装位置：{}\n\n\
+                         ⚠️ ClaudeTool 当前进程持有旧的 PATH 快照，需要\n\
+                         **完全退出 ClaudeTool 再重新启动**才能识别 claude 命令。",
+                        installed_path.display()
+                    ),
                 },
             );
             Ok(())
         }
     }
+}
+
+/// Translate a low-level download/network error into a user-actionable Chinese
+/// message, classifying common failure modes.
+fn classify_download_error(err: &AppError, stage_label: &str) -> String {
+    let raw = err.to_string();
+    let lower = raw.to_lowercase();
+    let hint = if lower.contains("just a moment")
+        || lower.contains("_cf_chl")
+        || lower.contains("cloudflare")
+    {
+        "你的代理出口 IP 被 Cloudflare 拦截。建议换 VPN 节点（避开数据中心 IP，首选住宅节点）后重试。"
+    } else if lower.contains("connection closed")
+        || lower.contains("econnreset")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
+    {
+        "连接被中途切断（多半是代理/VPN 抖动）。建议换节点或换协议（TLS/Trojan 比 SS 更稳）后重试。"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "网络超时。建议确认代理是否在工作，或换更快的节点后重试。"
+    } else if lower.contains("dns") || lower.contains("not found") || lower.contains("notfound") {
+        "DNS 解析失败。请确认 ClaudeTool 设置里的代理地址正确，或检查 VPN 是否开启。"
+    } else if lower.contains("ssl") || lower.contains("tls") || lower.contains("certificate") {
+        "TLS/证书验证失败。可能代理是 HTTP-only 而目标是 HTTPS，或本机时间不准。"
+    } else {
+        "建议：检查代理设置、换 VPN 节点、或稍后重试。"
+    };
+    format!("{stage_label}失败：{raw}\n\n{hint}")
 }
