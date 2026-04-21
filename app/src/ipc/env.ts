@@ -21,7 +21,14 @@ export interface UpdateInfo {
 }
 
 export type GitStatus =
-  | { kind: 'installed'; version: string; path: string; bashPath: string | null }
+  | {
+      kind: 'installed';
+      version: string;
+      path: string;
+      bashPath: string | null;
+      /** False when discovered via registry (PATH wasn't updated). */
+      inPath: boolean;
+    }
   | { kind: 'notInstalled' };
 
 export type GitBashEnvStatus =

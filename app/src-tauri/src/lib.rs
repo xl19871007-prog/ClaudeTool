@@ -31,6 +31,7 @@ pub fn run() {
             commands::read_skill_md,
             commands::install_git,
             commands::install_claude_code,
+            commands::repair_git_env,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

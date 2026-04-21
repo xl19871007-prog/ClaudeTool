@@ -176,3 +176,8 @@ pub async fn install_git(app: AppHandle) -> Result<()> {
 pub async fn install_claude_code(app: AppHandle) -> Result<()> {
     crate::installer::install_claude_code(app).await
 }
+
+#[tauri::command]
+pub async fn repair_git_env(app: AppHandle) -> Result<()> {
+    crate::installer::repair_git_env(app).await
+}

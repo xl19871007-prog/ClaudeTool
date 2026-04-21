@@ -24,3 +24,4 @@ export const onInstallEvent = (handler: (e: InstallEvent) => void): Promise<Unli
 
 export const installGit = () => invoke<void>('install_git');
 export const installClaudeCode = () => invoke<void>('install_claude_code');
+export const repairGitEnv = () => invoke<void>('repair_git_env');

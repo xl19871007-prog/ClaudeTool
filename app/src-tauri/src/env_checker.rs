@@ -42,6 +42,11 @@ pub enum GitStatus {
         version: String,
         path: String,
         bash_path: Option<String>,
+        /// Whether `git` resolves on the user's current PATH. False means we
+        /// found Git via registry (e.g. installed to a non-default drive without
+        /// PATH being updated) — UI should offer the one-click env var repair
+        /// instead of a re-install.
+        in_path: bool,
     },
     NotInstalled,
 }
@@ -94,30 +99,55 @@ pub fn check_claude_installed() -> ClaudeStatus {
     ClaudeStatus::Installed { version, path }
 }
 
+/// Two-stage detection:
+///   1. Try the user's PATH (`git --version`). Fast path, covers default installs.
+///   2. Fall back to Windows registry (HKLM/HKCU GitForWindows + Uninstall key)
+///      so we still find Git when the user installed it to a non-default drive
+///      without updating PATH. Returns `in_path: false` in that case so the UI
+///      can offer a one-click env-var repair.
 pub fn check_git_installed() -> GitStatus {
-    let Some(version) = run_git_version() else {
-        return GitStatus::NotInstalled;
-    };
-    let path = find_git_path()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "git".into());
-    let bash_path = find_git_bash_path();
-    GitStatus::Installed {
-        version,
-        path,
-        bash_path: bash_path.map(|p| p.to_string_lossy().to_string()),
+    if let Some(version) = run_git_version_with("git") {
+        let path = find_git_path_via_where()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "git".into());
+        let bash = derive_bash_from_git_exe(&PathBuf::from(&path));
+        return GitStatus::Installed {
+            version,
+            path,
+            bash_path: bash.map(|p| p.to_string_lossy().to_string()),
+            in_path: true,
+        };
     }
+
+    #[cfg(target_os = "windows")]
+    if let Some(install_root) = find_git_install_via_registry() {
+        let git_exe = install_root.join("cmd").join("git.exe");
+        if git_exe.exists() {
+            if let Some(version) = run_git_version_with(&git_exe.to_string_lossy()) {
+                let bash = install_root.join("bin").join("bash.exe");
+                let bash_opt = if bash.exists() { Some(bash) } else { None };
+                return GitStatus::Installed {
+                    version,
+                    path: git_exe.to_string_lossy().to_string(),
+                    bash_path: bash_opt.map(|p| p.to_string_lossy().to_string()),
+                    in_path: false,
+                };
+            }
+        }
+    }
+
+    GitStatus::NotInstalled
 }
 
-fn run_git_version() -> Option<String> {
-    let output = silent_command("git").arg("--version").output().ok()?;
+fn run_git_version_with(program: &str) -> Option<String> {
+    let output = silent_command(program).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
     }
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn find_git_path() -> Option<PathBuf> {
+fn find_git_path_via_where() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     let cmd = "where";
     #[cfg(not(target_os = "windows"))]
@@ -133,14 +163,12 @@ fn find_git_path() -> Option<PathBuf> {
         .map(|l| PathBuf::from(l.trim()))
 }
 
-/// On Windows, find git-bash.exe by inspecting the git install directory.
-/// `git.exe` is typically at `<install>/cmd/git.exe`; bash is at `<install>/bin/bash.exe`.
+/// Given a discovered `git.exe` path, walk up to the install root and return
+/// `<install>/bin/bash.exe` if it exists. Both standard install layouts work:
+/// `<install>/cmd/git.exe` (most common) and `<install>/mingw64/bin/git.exe`.
 #[cfg(target_os = "windows")]
-fn find_git_bash_path() -> Option<PathBuf> {
-    let git_path = find_git_path()?;
-    // git.exe is in <install>/cmd/ or <install>/mingw64/bin/
+fn derive_bash_from_git_exe(git_path: &std::path::Path) -> Option<PathBuf> {
     let mut dir = git_path.parent()?.to_path_buf();
-    // Walk up to find install root (the dir containing both `cmd/` and `bin/`).
     for _ in 0..3 {
         let bash = dir.join("bin").join("bash.exe");
         if bash.exists() {
@@ -154,7 +182,78 @@ fn find_git_bash_path() -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn find_git_bash_path() -> Option<PathBuf> {
+fn derive_bash_from_git_exe(_git_path: &std::path::Path) -> Option<PathBuf> {
+    None
+}
+
+/// Read Git for Windows install root from the registry. Tries the standard
+/// keys the official Inno Setup installer writes, in order:
+///   HKLM\SOFTWARE\GitForWindows                              (system-wide 64-bit)
+///   HKLM\SOFTWARE\WOW6432Node\GitForWindows                  (system-wide 32-bit on 64-bit OS)
+///   HKCU\SOFTWARE\GitForWindows                              (user-scope install)
+///   HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1  (Inno fallback)
+///
+/// We shell out to `reg query` rather than depending on the `winreg` crate to
+/// keep the dependency footprint minimal — `reg.exe` ships with every Windows.
+#[cfg(target_os = "windows")]
+fn find_git_install_via_registry() -> Option<PathBuf> {
+    const PROBES: &[(&str, &str)] = &[
+        (r"HKLM\SOFTWARE\GitForWindows", "InstallPath"),
+        (r"HKLM\SOFTWARE\WOW6432Node\GitForWindows", "InstallPath"),
+        (r"HKCU\SOFTWARE\GitForWindows", "InstallPath"),
+        (
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1",
+            "InstallLocation",
+        ),
+        (
+            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1",
+            "InstallLocation",
+        ),
+    ];
+    for (key, value) in PROBES {
+        if let Some(path) = reg_query_string(key, value) {
+            let candidate = PathBuf::from(path.trim_end_matches('\\'));
+            if candidate.join("cmd").join("git.exe").exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Run `reg query <key> /v <value>` and return the REG_SZ payload.
+/// Returns None if the key or value is missing, or if reg.exe fails.
+/// We deliberately avoid -reg:32/-reg:64 specifiers — for HKLM\SOFTWARE\WOW6432Node
+/// the key is already explicit, and for the others Inno Setup writes the
+/// 64-bit view on a 64-bit OS.
+#[cfg(target_os = "windows")]
+fn reg_query_string(key: &str, value: &str) -> Option<String> {
+    let output = silent_command("reg")
+        .args(["query", key, "/v", value])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Some(idx) = line.find("REG_SZ") {
+            let payload = line[idx + "REG_SZ".len()..].trim();
+            if !payload.is_empty() {
+                return Some(payload.to_string());
+            }
+        }
+        if let Some(idx) = line.find("REG_EXPAND_SZ") {
+            let payload = line[idx + "REG_EXPAND_SZ".len()..].trim();
+            if !payload.is_empty() {
+                // Best-effort %USERPROFILE% expansion (only var Inno typically uses).
+                if let Ok(user) = std::env::var("USERPROFILE") {
+                    return Some(payload.replace("%USERPROFILE%", &user));
+                }
+                return Some(payload.to_string());
+            }
+        }
+    }
     None
 }
 

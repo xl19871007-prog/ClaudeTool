@@ -314,49 +314,61 @@ async fn set_git_bash_env_var(app: &AppHandle, bash_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Append `%USERPROFILE%\.local\bin` to the user PATH if not already present.
+/// Append an arbitrary directory to the user PATH if not already present.
 ///
-/// Why this is needed: Anthropic's `irm https://claude.ai/install.ps1 | iex`
-/// script sometimes fails to modify the user PATH on Windows — it prints the
-/// warning "Native installation exists but C:\Users\...\.local\bin is not in
-/// your PATH" and leaves it to the user to add it manually. Without this entry
-/// in user PATH, even a ClaudeTool restart won't find `claude.exe` because the
-/// PATH inherited from the system genuinely lacks it.
+/// Why PowerShell `[Environment]::SetEnvironmentVariable` instead of `setx`:
+/// setx truncates the value at 1024 characters — a real risk when the existing
+/// user PATH is already long. SetEnvironmentVariable has no such limit.
 ///
-/// We use PowerShell's `[Environment]::SetEnvironmentVariable` rather than
-/// `setx` because setx truncates the value to 1024 characters — a real risk
-/// when the existing user PATH is already long.
-async fn ensure_local_bin_in_path(app: &AppHandle) -> Result<()> {
+/// Idempotent: if `target_dir` is already in user PATH, we just log and return.
+async fn add_dir_to_user_path(app: &AppHandle, target_dir: &str) -> Result<()> {
     emit(
         app,
         InstallEvent::Configuring {
-            message: "检查并补全 user PATH（%USERPROFILE%\\.local\\bin）...".into(),
+            message: format!("追加到 user PATH：{}", truncate(target_dir, 100)),
         },
     );
-    // Single-line PS: read user PATH, add .local\bin if missing.
-    let script = "$bin = Join-Path $env:USERPROFILE '.local\\bin'; \
-                  $p = [Environment]::GetEnvironmentVariable('PATH','User'); \
-                  if ([string]::IsNullOrEmpty($p)) { $p = '' }; \
-                  $parts = $p.Split(';') | Where-Object { $_ -ne '' }; \
-                  if ($parts -notcontains $bin) { \
-                    $new = if ([string]::IsNullOrEmpty($p)) { $bin } else { \"$p;$bin\" }; \
-                    [Environment]::SetEnvironmentVariable('PATH', $new, 'User'); \
-                    Write-Host \"[path] appended $bin to user PATH\" \
-                  } else { \
-                    Write-Host \"[path] $bin already present in user PATH\" \
-                  }";
+    // Escape single quotes (`'` → `''`) so an install path with a quote can't
+    // close our PowerShell string. Standard install paths shouldn't have them
+    // but defending costs nothing.
+    let escaped = target_dir.replace('\'', "''");
+    let script = format!(
+        "$bin = '{escaped}'; \
+         $p = [Environment]::GetEnvironmentVariable('PATH','User'); \
+         if ([string]::IsNullOrEmpty($p)) {{ $p = '' }}; \
+         $parts = $p.Split(';') | Where-Object {{ $_ -ne '' }}; \
+         if ($parts -notcontains $bin) {{ \
+           $new = if ([string]::IsNullOrEmpty($p)) {{ $bin }} else {{ \"$p;$bin\" }}; \
+           [Environment]::SetEnvironmentVariable('PATH', $new, 'User'); \
+           Write-Host \"[path] appended $bin to user PATH\" \
+         }} else {{ \
+           Write-Host \"[path] $bin already present in user PATH\" \
+         }}"
+    );
     let code = spawn_streaming(
         app,
         "powershell.exe",
-        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script],
     )
     .await?;
     if code != 0 {
         return Err(AppError::Config(format!(
-            "补全 user PATH 失败，PowerShell 退出码 {code}"
+            "追加 user PATH 失败，PowerShell 退出码 {code}"
         )));
     }
     Ok(())
+}
+
+/// Append `%USERPROFILE%\.local\bin` to user PATH (where Claude Code installs
+/// `claude.exe`). Wraps `add_dir_to_user_path` with the resolved absolute path,
+/// since Anthropic's `install.ps1` sometimes leaves PATH untouched and prints
+/// "Native installation exists but ... is not in your PATH" — without this
+/// entry, even a ClaudeTool restart can't find `claude.exe`.
+async fn ensure_local_bin_in_path(app: &AppHandle) -> Result<()> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| AppError::Config("could not resolve user home dir".into()))?;
+    let bin = home.join(".local").join("bin");
+    add_dir_to_user_path(app, &bin.to_string_lossy()).await
 }
 
 /// Install Git for Windows end-to-end.
@@ -563,6 +575,116 @@ pub async fn install_git_for_windows(app: AppHandle) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// One-click repair for "Git is installed but env vars aren't configured".
+///
+/// Triggered when the user installed Git for Windows themselves to a non-default
+/// location (e.g. `D:\Program Files\Git`) and either skipped the "add to PATH"
+/// option in the installer, or it didn't take effect. We discover the install
+/// via registry (handled by `env_checker::check_git_installed`), then:
+///   1. Append `<install>\cmd` to user PATH (so `git` resolves in shells)
+///   2. Set `CLAUDE_CODE_GIT_BASH_PATH = <install>\bin\bash.exe` (so Claude
+///      Code's plugin commands can find bash)
+///
+/// Idempotent: safe to re-run. No re-download, no UAC.
+pub async fn repair_git_env(app: AppHandle) -> Result<()> {
+    emit(
+        &app,
+        InstallEvent::Started {
+            target: "git-env-repair".into(),
+        },
+    );
+
+    let status = crate::env_checker::check_git_installed();
+    let (git_path_str, bash_path_opt) = match status {
+        crate::env_checker::GitStatus::Installed {
+            path, bash_path, ..
+        } => (path, bash_path),
+        crate::env_checker::GitStatus::NotInstalled => {
+            let msg = "未检测到 Git。请先点「一键安装 Git」。\n\n\
+                       （如果你确认装了 Git 但仍提示未检测到，可能是绿色版/Scoop 版没写注册表——\
+                       这种情况请手动设置环境变量，或卸载后用官方安装器重装。）"
+                .to_string();
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "detect".into(),
+                    message: msg.clone(),
+                    recoverable: false,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+
+    // Resolve <install>\cmd from the discovered git.exe path.
+    let git_exe = PathBuf::from(&git_path_str);
+    let cmd_dir = match git_exe.parent() {
+        Some(d) => d.to_path_buf(),
+        None => {
+            let msg = format!("无法解析 git.exe 父目录：{git_path_str}");
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "resolve".into(),
+                    message: msg.clone(),
+                    recoverable: false,
+                },
+            );
+            return Err(AppError::Config(msg));
+        }
+    };
+    let cmd_dir_str = cmd_dir.to_string_lossy().to_string();
+
+    if let Err(e) = add_dir_to_user_path(&app, &cmd_dir_str).await {
+        emit(
+            &app,
+            InstallEvent::Failed {
+                stage_id: "path".into(),
+                message: format!("追加 PATH 失败：{e}"),
+                recoverable: true,
+            },
+        );
+        return Err(e);
+    }
+
+    // Bash env var (best-effort: a real Git for Windows install always has bash)
+    let bash_msg = if let Some(bash) = bash_path_opt.as_ref() {
+        if let Err(e) = set_git_bash_env_var(&app, bash).await {
+            emit(
+                &app,
+                InstallEvent::Failed {
+                    stage_id: "configure".into(),
+                    message: format!("配置 CLAUDE_CODE_GIT_BASH_PATH 失败：{e}"),
+                    recoverable: true,
+                },
+            );
+            return Err(e);
+        }
+        bash.clone()
+    } else {
+        emit(
+            &app,
+            InstallEvent::Log {
+                line: "[warn] 未在 Git 安装目录下找到 bin\\bash.exe，跳过 CLAUDE_CODE_GIT_BASH_PATH"
+                    .into(),
+            },
+        );
+        "（未设置——Git 安装目录下未找到 bash.exe）".to_string()
+    };
+
+    emit(
+        &app,
+        InstallEvent::Done {
+            message: format!(
+                "✓ Git 环境变量已配置：\n\n  • PATH 追加：{cmd_dir_str}\n  • CLAUDE_CODE_GIT_BASH_PATH：{bash_msg}\n\n\
+                 ⚠️ ClaudeTool 当前进程持有旧的环境变量快照，需要\n\
+                 **完全退出 ClaudeTool 再重新启动**才能识别 git 命令。"
+            ),
+        },
+    );
+    Ok(())
 }
 
 // =============================================================================
