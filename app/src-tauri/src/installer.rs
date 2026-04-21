@@ -163,12 +163,96 @@ async fn download_once(
     use tokio::io::AsyncWriteExt;
 
     let dest = std::env::temp_dir().join(suggested_filename);
-    let mut file = tokio::fs::File::create(&dest).await?;
 
-    let mut resp = net::client().get(url).send().await?.error_for_status()?;
-    let total = resp.content_length().or(expected_size);
+    // Resume support: if a partial file already exists from a prior attempt
+    // (within this run, or even from a previous failed install before the user
+    // closed the dialog), skip what we already have via HTTP Range. Verified
+    // before shipping that both downloads.claude.ai (GCS) and GitHub releases
+    // (Azure blob via Fastly) honor `Range: bytes=N-` with a 206 response.
+    //
+    // Stale-file guard: if the existing file is already at least as large as
+    // the expected size (likely from a different/older version under the same
+    // temp filename), throw it out and start fresh — the SHA256 check would
+    // catch it later but this saves a wasted 250MB download.
+    let existing_size: u64 = match tokio::fs::metadata(&dest).await {
+        Ok(m) if m.is_file() => m.len(),
+        _ => 0,
+    };
+    let resume_from = match (existing_size, expected_size) {
+        (s, Some(t)) if s >= t => 0,
+        (s, _) => s,
+    };
+    if existing_size > 0 && resume_from == 0 {
+        let _ = tokio::fs::remove_file(&dest).await;
+    }
 
-    let mut downloaded: u64 = 0;
+    let mut req = net::client().get(url);
+    if resume_from > 0 {
+        req = req.header("Range", format!("bytes={resume_from}-"));
+        emit(
+            app,
+            InstallEvent::Log {
+                line: format!(
+                    "[download] 续传请求 bytes={resume_from}- （已有 {:.1}MB）",
+                    resume_from as f64 / 1_048_576.0
+                ),
+            },
+        );
+    }
+    let mut resp = req.send().await?.error_for_status()?;
+
+    // If the server returned 200 instead of 206, our Range header was ignored
+    // (the server is sending the full file from byte 0). Fall back to overwrite.
+    let effective_resume = if resp.status().as_u16() == 206 {
+        resume_from
+    } else {
+        if resume_from > 0 {
+            emit(
+                app,
+                InstallEvent::Log {
+                    line: format!(
+                        "[download] 服务器返回 {}（不支持续传），从 0 重新下载",
+                        resp.status()
+                    ),
+                },
+            );
+        }
+        0
+    };
+
+    // For 206, Content-Length is just the remaining bytes; the true total is
+    // `effective_resume + remaining`. For 200 / unknown, fall through to
+    // expected_size as before.
+    let total = match resp.content_length() {
+        Some(cl) => Some(effective_resume + cl),
+        None => expected_size,
+    };
+
+    let mut file = if effective_resume > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&dest)
+            .await?
+    } else {
+        tokio::fs::File::create(&dest).await?
+    };
+
+    let attempt_suffix = if attempt > 1 {
+        if effective_resume > 0 {
+            format!(
+                "（第 {attempt}/{max_attempts} 次尝试，从 {:.1}MB 续传）",
+                effective_resume as f64 / 1_048_576.0
+            )
+        } else {
+            format!("（第 {attempt}/{max_attempts} 次尝试）")
+        }
+    } else if effective_resume > 0 {
+        format!("（从 {:.1}MB 续传）", effective_resume as f64 / 1_048_576.0)
+    } else {
+        String::new()
+    };
+
+    let mut downloaded: u64 = effective_resume;
     let mut last_emit = Instant::now();
 
     loop {
@@ -188,11 +272,7 @@ async fn download_once(
                                 total
                                     .map(|t| format!(" / {:.1}MB", t as f64 / 1_048_576.0))
                                     .unwrap_or_default(),
-                                if attempt > 1 {
-                                    format!("（第 {attempt}/{max_attempts} 次尝试）")
-                                } else {
-                                    String::new()
-                                }
+                                attempt_suffix
                             ),
                         },
                     );
@@ -201,11 +281,14 @@ async fn download_once(
             }
             Ok(None) => break,
             Err(e) => {
+                // Best-effort flush before bailing so the next attempt's
+                // Range request reflects everything we actually wrote.
+                let _ = file.flush().await;
                 emit(
                     app,
                     InstallEvent::Log {
                         line: format!(
-                            "[download] chunk error after {:.1}MB: {e}",
+                            "[download] chunk error after {:.1}MB: {e}（下次重试会续传）",
                             downloaded as f64 / 1_048_576.0
                         ),
                     },
