@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, CheckCircle2, XCircle, Copy, FolderOpen } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Modal } from '@/components/ui/Modal';
@@ -10,6 +10,14 @@ interface InstallProgressDialogProps {
   title: string;
   /** Called when user dismisses dialog (only enabled after done/failed). */
   onClose: () => void;
+  /**
+   * Re-fires the install/repair command. The button only shows when the
+   * failure was marked recoverable. Resume happens automatically — the temp
+   * download file is preserved across retries, so a user whose proxy died
+   * after 5 auto-attempts can keep clicking and chip away at the remaining
+   * bytes instead of restarting from 0.
+   */
+  onRetry?: () => void;
 }
 
 interface FailedState {
@@ -18,7 +26,12 @@ interface FailedState {
   recoverable: boolean;
 }
 
-export function InstallProgressDialog({ open, title, onClose }: InstallProgressDialogProps) {
+export function InstallProgressDialog({
+  open,
+  title,
+  onClose,
+  onRetry,
+}: InstallProgressDialogProps) {
   const [stage, setStage] = useState<string>('started');
   const [statusText, setStatusText] = useState<string>('启动中...');
   const [downloaded, setDownloaded] = useState<number | null>(null);
@@ -102,6 +115,21 @@ export function InstallProgressDialog({ open, title, onClose }: InstallProgressD
     }
   };
 
+  const handleRetry = () => {
+    if (!onRetry) return;
+    // Reset progress UI but KEEP the existing event listener attached — the
+    // useEffect cleanup is gated on `open` changing, and `open` stays true
+    // here, so events from the next invocation will keep flowing through.
+    setStage('started');
+    setStatusText('启动中（自动续传已下载部分）...');
+    setDownloaded(null);
+    setTotal(null);
+    setLogs([]);
+    setDone(false);
+    setFailed(null);
+    onRetry();
+  };
+
   const handleOpenLogDir = async () => {
     // Open the system temp dir as a best-effort (tauri-plugin-fs has no
     // dedicated "open dir in explorer" but opener supports paths).
@@ -160,6 +188,16 @@ export function InstallProgressDialog({ open, title, onClose }: InstallProgressD
             <p className="text-xs font-semibold text-destructive">出错了</p>
             <p className="mt-1 text-xs">{failed.message}</p>
             <div className="mt-2 flex flex-wrap gap-2">
+              {failed.recoverable && onRetry && (
+                <button
+                  onClick={handleRetry}
+                  className="flex items-center gap-1 rounded bg-primary px-3 py-1 text-[11px] text-primary-foreground hover:opacity-90"
+                  title="保留已下载的字节，从断点继续下载"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  继续重试（自动续传已下载部分）
+                </button>
+              )}
               <button
                 onClick={handleCopyError}
                 className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] hover:bg-muted"

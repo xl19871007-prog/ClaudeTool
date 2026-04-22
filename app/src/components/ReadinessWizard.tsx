@@ -253,6 +253,15 @@ export function ReadinessWizard() {
                 : ''
         }
         onClose={() => setActiveInstall(null)}
+        onRetry={
+          activeInstall === 'git'
+            ? () => void handleInstallGit()
+            : activeInstall === 'claude'
+              ? () => void handleInstallClaude()
+              : activeInstall === 'gitEnvRepair'
+                ? () => void handleRepairGitEnv()
+                : undefined
+        }
       />
 
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
